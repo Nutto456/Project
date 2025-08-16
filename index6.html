@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Drowsiness Detection – Client Only + Phone (MediaPipe Matrix • Auto‑scale)</title>
+  <link rel="icon" href="data:,"> <!-- ปิด 404 favicon -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; }
+    .video-wrap { position: relative; width: 100%; max-width: 960px; aspect-ratio: 4/3; }
+    #video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+    #overlay { position: absolute; inset: 0; transform: scaleX(-1); }
+    #toast { position: fixed; top: 1rem; right: 1rem; z-index: 50; }
+    .badge { display:inline-block; padding:.25rem .5rem; border-radius:.5rem; font-size:.75rem; }
+    .subtle { font-size:.75rem; color: #334155; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-4">
+  <div id="toast" class="hidden px-4 py-2 rounded-lg text-white shadow"></div>
+
+  <div class="mx-auto bg-white rounded-2xl shadow-xl p-4 max-w-5xl">
+    <h1 class="text-2xl md:text-3xl font-bold text-center mb-4">Drowsiness Detection (Client‑side)</h1>
+
+    <div class="video-wrap mx-auto rounded-xl overflow-hidden bg-gray-200">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-4 mt-4">
+      <div id="alertBox" class="hidden md:col-span-1 bg-red-100 text-red-800 rounded-xl p-4 font-semibold"></div>
+      <div class="md:col-span-2 bg-emerald-50 text-emerald-900 rounded-xl p-4">
+        <p class="font-bold flex items-center gap-2">
+          Status
+          <span id="safeBadge" class="badge bg-blue-600 text-white">Custom</span>
+          <span id="dbgMode" class="badge bg-slate-200 text-slate-700">matrix: auto</span>
+          <span id="camBadge" class="badge bg-slate-200 text-slate-700">cam: ?</span>
+          <span id="modelBadge" class="badge bg-slate-200 text-slate-700">models: ?</span>
+          <span id="faceBadge" class="badge bg-slate-200 text-slate-700">faces: 0</span>
+        </p>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 mt-2 text-sm md:text-base">
+          <div>Pitch: <span id="pitchOut" class="font-semibold">-</span></div>
+          <div>Yaw: <span id="yawOut" class="font-semibold">-</span></div>
+          <div>Head LR: <span id="headLROut" class="font-semibold">-</span></div>
+          <div>Head UD: <span id="headUDOut" class="font-semibold">-</span></div>
+          <div>Eyes: <span id="eyesOut" class="font-semibold">-</span></div>
+          <div>Yawn: <span id="yawnOut" class="font-semibold">-</span></div>
+          <div>Hands: <span id="handsOut" class="font-semibold">-</span></div>
+          <div>Phone: <span id="phoneOut" class="font-semibold">-</span></div>
+        </div>
+        <p class="subtle mt-2" id="scaleDbg">auto‑scale: yaw×1.00 pitch×1.00</p>
+      </div>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-4 mt-4">
+      <div class="bg-slate-50 rounded-xl p-4">
+        <p class="font-bold mb-2">Controls</p>
+        <div class="flex flex-wrap gap-3">
+          <button id="btnToggle" class="px-4 py-2 rounded-xl text-white bg-blue-600 hover:bg-blue-700 font-semibold shadow">Start</button>
+          <button id="btnCalib" class="px-4 py-2 rounded-xl text-white bg-indigo-600 hover:bg-indigo-700 font-semibold shadow">Calibrate Head</button>
+          <button id="btnFlipYaw" class="px-4 py-2 rounded-xl text-white bg-slate-700 hover:bg-slate-800 font-semibold shadow">Flip Yaw: OFF</button>
+          <button id="btnFlipPitch" class="px-4 py-2 rounded-xl text-white bg-slate-700 hover:bg-slate-800 font-semibold shadow">Flip Pitch: OFF</button>
+        </div>
+      </div>
+
+      <div class="bg-slate-50 rounded-xl p-4">
+        <p class="font-bold mb-2">Performance</p>
+        <div class="space-y-2 text-sm">
+          <label class="flex items-center gap-2">
+            <input id="cbHeadPose" type="checkbox" class="scale-125" checked>
+            <span>Enable Head Pose (MediaPipe Matrix)</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <input id="cbDrawPoints" type="checkbox" class="scale-125" checked>
+            <span>Draw face keypoints</span>
+          </label>
+
+          <label class="flex items-center gap-2">
+            <input id="cbPhone" type="checkbox" class="scale-125">
+            <span>Enable Phone Detector</span>
+          </label>
+          <label class="flex items-center gap-2 ml-6">
+            <input id="cbPhoneWithHand" type="checkbox" class="scale-125">
+            <span>Consider “Using Phone” only if hand overlaps phone</span>
+          </label>
+
+          <label class="flex items-center gap-2 mt-3">
+            <input id="cbAutoScale" type="checkbox" class="scale-125" checked>
+            <span>Auto‑scale yaw/pitch (landmark‑assisted)</span>
+          </label>
+
+          <div class="flex items-center gap-2 mt-3">
+            <label for="fps" class="whitespace-nowrap">FPS Throttle:</label>
+            <select id="fps" class="border rounded px-2 py-1">
+              <option>24</option>
+              <option selected>30</option>
+              <option>15</option>
+              <option>10</option>
+            </select>
+          </div>
+
+          <div class="flex items-center gap-2 mt-3">
+            <label for="poseGain" class="whitespace-nowrap">Pose Gain (all):</label>
+            <input id="poseGain" type="range" min="0.80" max="2.00" step="0.05" value="1.20" class="w-40">
+            <span id="poseGainLabel" class="tabular-nums">1.20×</span>
+          </div>
+
+          <div class="flex items-center gap-2 mt-3">
+            <label for="yawGain" class="whitespace-nowrap">Yaw Gain:</label>
+            <input id="yawGain" type="range" min="0.50" max="4.00" step="0.10" value="2.00" class="w-40">
+            <span id="yawGainLabel" class="tabular-nums">2.00×</span>
+          </div>
+          <div class="flex items-center gap-2 mt-2">
+            <label for="pitchGain" class="whitespace-nowrap">Pitch Gain:</label>
+            <input id="pitchGain" type="range" min="0.50" max="4.00" step="0.10" value="1.40" class="w-40">
+            <span id="pitchGainLabel" class="tabular-nums">1.40×</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-slate-50 rounded-xl p-4">
+        <p class="font-bold mb-2">Tips</p>
+        <ul class="list-disc ml-5 text-sm text-slate-700 space-y-1">
+          <li>ติ๊ก Head Pose + Calibrate ก่อนทดสอบซ้าย/ขวา/ก้ม/เงย</li>
+          <li>กด Flip Yaw/Pitch ถ้าทิศกลับใจ</li>
+          <li>ค่าน้อย/ช่วงไม่เท่ากัน → เปิด Auto‑scale หรือปรับ Yaw/Pitch Gain</li>
+          <li>Phone Detector: เปิดได้ แต่ตั้งค่าเป็น Low‑rate เพื่อลดผลกระทบกับมุมศีรษะ</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- เสียงเตือน -->
+  <audio id="sndEyes"  src="./static/Sound/eyeclosed_alert.mp3" preload="auto"></audio>
+  <audio id="sndYawn"  src="./static/Sound/Yawn_alert.mp3" preload="auto"></audio>
+  <audio id="sndHands" src="./static/Sound/both_hand_alert.mp3" preload="auto"></audio>
+  <audio id="sndPhone" src="./static/Sound/phone_alert.mp3" preload="auto"></audio>
+
+  <script type="module">
+    import { FaceLandmarker, HandLandmarker, ObjectDetector, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+    // ---------- Elements ----------
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('overlay');
+    const ctx = canvas.getContext('2d');
+
+    const btnToggle = document.getElementById('btnToggle');
+    const btnCalib = document.getElementById('btnCalib');
+    const btnFlipYaw = document.getElementById('btnFlipYaw');
+    const btnFlipPitch = document.getElementById('btnFlipPitch');
+
+    const cbHeadPose = document.getElementById('cbHeadPose');
+    const cbDrawPoints = document.getElementById('cbDrawPoints');
+    const cbPhone = document.getElementById('cbPhone');
+    const cbPhoneWithHand = document.getElementById('cbPhoneWithHand');
+    const cbAutoScale = document.getElementById('cbAutoScale');
+
+    const fpsSel = document.getElementById('fps');
+    const safeBadge = document.getElementById('safeBadge');
+    const dbgMode = document.getElementById('dbgMode');
+    const scaleDbg = document.getElementById('scaleDbg');
+    const camBadge = document.getElementById('camBadge');
+    const modelBadge = document.getElementById('modelBadge');
+    const faceBadge = document.getElementById('faceBadge');
+
+    const poseGainEl = document.getElementById('poseGain');
+    const poseGainLabel = document.getElementById('poseGainLabel');
+    const yawGainEl = document.getElementById('yawGain');
+    const yawGainLabel = document.getElementById('yawGainLabel');
+    const pitchGainEl = document.getElementById('pitchGain');
+    const pitchGainLabel = document.getElementById('pitchGainLabel');
+
+    let poseGain = 1.20;
+    let yawGain = 2.00; // เพิ่มแรงซ้าย/ขวาเริ่มต้น
+    let pitchGain = 1.40; // เพิ่มแรงก้ม/เงยเริ่มต้น
+
+    poseGainEl?.addEventListener('input', ()=>{ const v=Number(poseGainEl.value); poseGain = Number.isFinite(v)? v:1; poseGainLabel.textContent = `${poseGain.toFixed(2)}×`; });
+    yawGainEl?.addEventListener('input', ()=>{ const v=Number(yawGainEl.value); yawGain = Number.isFinite(v)? v:1; yawGainLabel.textContent = `${yawGain.toFixed(2)}×`; });
+    pitchGainEl?.addEventListener('input', ()=>{ const v=Number(pitchGainEl.value); pitchGain = Number.isFinite(v)? v:1; pitchGainLabel.textContent = `${pitchGain.toFixed(2)}×`; });
+
+    const pitchOut = document.getElementById('pitchOut');
+    const yawOut   = document.getElementById('yawOut');
+    const headLROut = document.getElementById('headLROut');
+    const headUDOut = document.getElementById('headUDOut');
+    const eyesOut  = document.getElementById('eyesOut');
+    const yawnOut  = document.getElementById('yawnOut');
+    const handsOut = document.getElementById('handsOut');
+    const phoneOut = document.getElementById('phoneOut');
+
+    const alertBox = document.getElementById('alertBox');
+    const toast = document.getElementById('toast');
+
+    const sndEyes  = document.getElementById('sndEyes');
+    const sndYawn  = document.getElementById('sndYawn');
+    const sndHands = document.getElementById('sndHands');
+    const sndPhone = document.getElementById('sndPhone');
+
+    // ---------- Config ----------
+    const THRESH = {
+      EYE_CLOSED: 0.13,
+      YAWN: 0.60,
+      EYE_CLOSED_SEC: 0.2,
+      YAWN_SEC: 3,
+      BOTH_HANDS_UP_SEC: 2,
+      PITCH_DOWN: 7,
+      PITCH_UP: -18,
+      YAW_LEFT: 15,
+      YAW_RIGHT: -15,
+      HOLD_SEC: 1.0,
+      PHONE_SCORE: 0.45,
+      PHONE_CADENCE: 12 // ตรวจมือถือทุก 12 เฟรม เพื่อลดภาระ
+    };
+
+    // ---------- State ----------
+    let isRunning = false;
+    let isBusy = false;
+    let lastTick = 0;
+    let flipYaw = false; let flipPitch = false;
+
+    let faceLandmarker, handLandmarker, objDetector;
+    let modelsReady = false, phoneReady = false;
+
+    let pitchOffset=0, yawOffset=0;
+    let pitchEMA=null, yawEMA=null, rollEMA=null;
+    let eyeStart=null, yawnStart=null, handsStart=null, yawStart=null, pitchStart=null;
+    let playing = new Set();
+
+    let frameCount = 0;
+    let lastPhoneDetections = [];
+
+    // auto scale factors (EMA)
+    let sYawAuto = 1.0, sPitchAuto = 1.0;
+
+    // ---------- Helpers ----------
+    const ema = (p, v, a=0.35) => (!Number.isFinite(v) ? p : (p==null ? v : a*v + (1-a)*p));
+    const clamp = (v, lo, hi)=> Math.max(lo, Math.min(hi, v));
+    const rad2deg = (r)=> r*57.2957795;
+    const showToast = (msg, ok=true)=>{ toast.textContent = msg; toast.className = `px-4 py-2 rounded-lg text-white shadow ${ok?'bg-green-600':'bg-red-600'}`; toast.classList.remove('hidden'); setTimeout(()=> toast.classList.add('hidden'), 2200); };
+    function playLoop(id, el){ if(!playing.has(id)){ el.loop = true; el.play().catch(()=>{}); playing.add(id);} }
+    function stopLoop(id, el){ if(playing.has(id)){ el.pause(); el.currentTime = 0; playing.delete(id);} }
+    function stopAll(){ stopLoop('EYES',sndEyes); stopLoop('YAWN',sndYawn); stopLoop('HANDS',sndHands); stopLoop('PHONE',sndPhone); }
+
+    const L = {
+      LEFT_EYE:  [33,160,158,133,153,144],
+      RIGHT_EYE: [263,387,385,362,380,373],
+      MOUTH: [78,95,88,178,87,14,317,402,318,324,308,415,13,312,311,310,415,308,402,317]
+    };
+    const dist = (a,b)=> Math.hypot(a.x-b.x, a.y-b.y);
+    const ear = (lm, idx)=> (dist(lm[idx[1]],lm[idx[5]])+dist(lm[idx[2]],lm[idx[4]])) / (2*dist(lm[idx[0]],lm[idx[3]]));
+    const mar = (lm, idx)=> (dist(lm[idx[13]],lm[idx[19]])+dist(lm[idx[14]],lm[idx[18]])) / (2*dist(lm[idx[12]],lm[idx[16]]));
+
+    function handsAboveFace(hands, face){
+      if(!hands?.length || !face?.length) return {count:0, both:false};
+      const faceMinY = Math.min(...face.map(p=>p.y));
+      let c=0; for(const h of hands){ const minY = Math.min(...h.map(p=>p.y)); if(minY < faceMinY) c++; }
+      return {count:c, both:c>=2};
+    }
+
+    function drawFewPoints(lm){
+      if(!cbDrawPoints || !cbDrawPoints.checked) return;
+      ctx.save(); ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = 'rgba(59,130,246,0.95)';
+      for(const i of [33,263,1,152,57,287]){ const p = lm[i]; ctx.beginPath(); ctx.arc(p.x*canvas.width, p.y*canvas.height, 3, 0, Math.PI*2); ctx.fill(); }
+      ctx.restore();
+    }
+
+    function setSafeBadge(){ const on = !cbHeadPose.checked; safeBadge.textContent = on ? "Safe Mode" : "Custom"; safeBadge.className = `badge ${on ? 'bg-gray-800 text-white' : 'bg-blue-600 text-white'}`; }
+
+    // ---------- Matrix → Euler helpers ----------
+    function eulerFromR(r){
+      const r00=r[0], r01=r[1], r02=r[2];
+      const r10=r[3], r11=r[4], r12=r[5];
+      const r20=r[6], r21=r[7], r22=r[8];
+      const sy = Math.hypot(r00,r10);
+      let pitch,yaw,roll;
+      if(sy>1e-6){ // XYZ convention: yaw(Y), pitch(X), roll(Z)
+        pitch = Math.atan2(-r20, sy);
+        yaw   = Math.atan2(r10, r00);
+        roll  = Math.atan2(r21, r22);
+      }else{
+        pitch = Math.atan2(-r20, sy);
+        yaw   = Math.atan2(-r01, r11);
+        roll  = 0;
+      }
+      return {pitch:rad2deg(pitch), yaw:rad2deg(yaw), roll:rad2deg(roll)};
+    }
+    function poseFromMatrixAuto(m4){
+      if(!m4) return null;
+      const arr = Array.from(m4);
+      if(arr.length<16) return null;
+      // Try ROW‑MAJOR then COL‑MAJOR, pick the one with larger total magnitude
+      const R_row = [arr[0],arr[1],arr[2], arr[4],arr[5],arr[6], arr[8],arr[9],arr[10]];
+      const R_col = [arr[0],arr[4],arr[8], arr[1],arr[5],arr[9], arr[2],arr[6],arr[10]];
+      const e_row = eulerFromR(R_row);
+      const e_col = eulerFromR(R_col);
+      const magRow = Math.abs(e_row.pitch)+Math.abs(e_row.yaw)+Math.abs(e_row.roll);
+      const magCol = Math.abs(e_col.pitch)+Math.abs(e_col.yaw)+Math.abs(e_col.roll);
+      const useCol = magCol > magRow*1.1; // prefer column if clearly larger
+      dbgMode.textContent = `matrix: ${useCol?'col-major':'row-major'}`;
+      const e = useCol? e_col : e_row;
+      return {
+        pitch: clamp(e.pitch, -60, 60),
+        yaw:   clamp(e.yaw,   -90, 90),
+        roll:  clamp(e.roll,  -60, 60)
+      };
+    }
+
+    // Simple landmark pose (for fallback & auto-scale reference)
+    function poseSimple(lm){
+      const Leye = lm[33], Reye=lm[263], Nose=lm[1];
+      if(!Leye||!Reye||!Nose) return null;
+      const midX = (Leye.x+Reye.x)/2, midY=(Leye.y)/2 + (Reye.y)/2;
+      const yaw = (Nose.x - midX) * 260;     // heuristic scale
+      const pitch = (midY - Nose.y) * 360;   // heuristic scale
+      return {pitch:clamp(pitch,-60,60), yaw:clamp(yaw,-90,90), roll:0};
+    }
+
+    // ---------- Init ----------
+    async function initModels(){
+      if(modelsReady) return; // กัน start ซ้ำจาก live reload
+      const resolver = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+      faceLandmarker = await FaceLandmarker.createFromOptions(resolver, {
+        baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task" },
+        numFaces:1,
+        runningMode:"VIDEO",
+        outputFaceBlendshapes:false,
+        outputFacialTransformationMatrixes:true
+      });
+      handLandmarker = await HandLandmarker.createFromOptions(resolver, { baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task" }, numHands:2, runningMode:"VIDEO" });
+      objDetector = await ObjectDetector.createFromOptions(resolver, { baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float32/1/efficientdet_lite0.tflite" }, scoreThreshold: THRESH.PHONE_SCORE, runningMode: "VIDEO", maxResults: 5 });
+      modelsReady = true; phoneReady = true;
+      modelBadge.textContent = 'models: ok';
+      modelBadge.className = 'badge bg-green-600 text-white';
+    }
+
+    async function startCam(){
+      try{
+        const st = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:"user", width:{ideal:1280}, height:{ideal:720} }, audio:false });
+        video.srcObject = st;
+        await new Promise(res => { if(video.readyState >= 1) res(); else video.onloadedmetadata = () => res(); });
+        await video.play();
+        canvas.width = video.videoWidth || 640; canvas.height = video.videoHeight || 480;
+        camBadge.textContent = 'cam: ok';
+        camBadge.className = 'badge bg-green-600 text-white';
+      }catch(err){
+        console.error(err);
+        showToast('ไม่สามารถเปิดกล้องได้: อนุญาตการใช้งานกล้อง', false);
+        camBadge.textContent = 'cam: blocked';
+        camBadge.className = 'badge bg-red-600 text-white';
+        throw err;
+      }
+    }
+
+    // ---------- UI update ----------
+    function updateUI(v){
+      const fmt = (x)=> Number.isFinite(x) ? x.toFixed(1) : "-";
+      pitchOut.textContent = fmt(v.pitch);
+      yawOut.textContent   = fmt(v.yaw);
+      headLROut.textContent = v.headLR ?? "-";
+      headUDOut.textContent = v.headUD ?? "-";
+      eyesOut.textContent  = v.eyeStatus ?? "-";
+      yawnOut.textContent  = v.yawnStatus ?? "-";
+      handsOut.textContent = v.handStatus ?? "-";
+      phoneOut.textContent = v.phone ? "Yes":"No";
+
+      const alerts = [];
+      if(v.eyeAlert) alerts.push("Eyes Closed!");
+      if(v.yawnAlert) alerts.push("Yawning!");
+      if(v.handsAlert) alerts.push("Both Hands Up!");
+      if(v.phoneAlert) alerts.push("Using Phone!");
+      if(v.yawAlertText) alerts.push(v.yawAlertText);
+      if(v.pitchAlertText) alerts.push(v.pitchAlertText);
+
+      if(alerts.length){ alertBox.classList.remove('hidden'); alertBox.innerHTML = alerts.map(a=>`<p>${a}</p>`).join(''); }
+      else { alertBox.classList.add('hidden'); alertBox.innerHTML=''; }
+
+      alerts.includes('Eyes Closed!')   ? playLoop('EYES',sndEyes)   : stopLoop('EYES',sndEyes);
+      alerts.includes('Yawning!')       ? playLoop('YAWN',sndYawn)   : stopLoop('YAWN',sndYawn);
+      alerts.includes('Both Hands Up!') ? playLoop('HANDS',sndHands) : stopLoop('HANDS',sndHands);
+      alerts.includes('Using Phone!')   ? playLoop('PHONE',sndPhone) : stopLoop('PHONE',sndPhone);
+    }
+
+    // ---------- Loop ----------
+    const getFPS = () => Number(fpsSel.value)||30;
+
+    async function loop(){
+      if(!isRunning) return;
+      const now = performance.now();
+      const budget = 1000/getFPS();
+      if(now - lastTick < budget){ requestAnimationFrame(loop); return; }
+      lastTick = now;
+      if(isBusy){ requestAnimationFrame(loop); return; }
+      isBusy = true;
+
+      try{
+        const resF = faceLandmarker?.detectForVideo?.(video, now);
+        const resH = handLandmarker?.detectForVideo?.(video, now);
+        const facesCount = resF?.faceLandmarks?.length || 0;
+        faceBadge.textContent = `faces: ${facesCount}`;
+
+        const face = resF?.faceLandmarks?.[0] || null;
+        const hands = (resH?.landmarks||[]).map(x=>x);
+
+        let pitch=null, yaw=null, roll=null;
+        let eyeStatus='-', yawnStatus='-', handStatus='No Hands';
+        let eyeAlert=false, yawnAlert=false, handsAlert=false, phoneAlert=false, phone=false;
+        let headLR='Center', headUD='Center', yawAlertText='', pitchAlertText='';
+
+        if(!cbDrawPoints || !cbDrawPoints.checked) ctx.clearRect(0,0,canvas.width,canvas.height);
+
+        if(face){
+          if(cbDrawPoints.checked) drawFewPoints(face);
+
+          if(cbHeadPose.checked){
+            const m4 = resF?.facialTransformationMatrixes?.[0];
+            let pose = poseFromMatrixAuto(m4);
+            if(!pose) pose = poseSimple(face); // fallback
+            if(pose){
+              const rawPitch = pose.pitch; const rawYaw = pose.yaw;
+
+              // auto-scale based on landmark heuristic reference
+              if(cbAutoScale.checked){
+                const heur = poseSimple(face);
+                if(heur){
+                  const ry = clamp(Math.abs(heur.yaw)/(Math.abs(rawYaw)+1e-3), 0.5, 6.0);
+                  const rp = clamp(Math.abs(heur.pitch)/(Math.abs(rawPitch)+1e-3), 0.5, 6.0);
+                  sYawAuto = ema(sYawAuto, ry, 0.08);
+                  sPitchAuto = ema(sPitchAuto, rp, 0.08);
+                }
+              }
+
+              pitchEMA = ema(pitchEMA, rawPitch);
+              yawEMA   = ema(yawEMA,   rawYaw);
+              rollEMA  = ema(rollEMA,  pose.roll);
+
+              const pVal = Number.isFinite(pitchEMA) ? pitchEMA : 0;
+              const yVal = Number.isFinite(yawEMA) ? yawEMA : 0;
+
+              const yScale = poseGain * yawGain * (cbAutoScale.checked ? sYawAuto : 1);
+              const pScale = poseGain * pitchGain * (cbAutoScale.checked ? sPitchAuto : 1);
+
+              pitch = clamp((pVal - pitchOffset) * pScale, -60, 60);
+              yaw   = clamp((yVal - yawOffset) * yScale,  -90, 90);
+
+              if(flipYaw)   yaw   = -yaw;
+              if(flipPitch) pitch = -pitch;
+
+              scaleDbg.textContent = `auto‑scale: yaw×${(sYawAuto||1).toFixed(2)} pitch×${(sPitchAuto||1).toFixed(2)}`;
+            }
+          }
+
+          // Eyes
+          const EAR = (ear(face, L.LEFT_EYE) + ear(face, L.RIGHT_EYE))/2;
+          if(EAR < THRESH.EYE_CLOSED){ if(eyeStart==null) eyeStart = now; else if((now-eyeStart)/1000 > THRESH.EYE_CLOSED_SEC) eyeAlert = true; eyesOut && (eyeStatus='Eyes Closed'); }
+          else { eyeStatus='Eyes Open'; eyeStart=null; }
+
+          // Yawn
+          const MAR = mar(face, L.MOUTH);
+          if(MAR > THRESH.YAWN){ if(yawnStart==null) yawnStart = now; else if((now-yawnStart)/1000 > THRESH.YAWN_SEC) yawnAlert = true; yawnStatus='Yawning'; }
+          else { yawnStatus='No Yawn'; yawnStart=null; }
+
+          if(Number.isFinite(yaw)){
+            if(yaw > Math.abs(THRESH.YAW_LEFT)) headLR = 'Turn Right';
+            else if(yaw < THRESH.YAW_RIGHT) headLR = 'Turn Left';
+            else headLR = 'Center';
+            if(headLR !== 'Center'){ if(yawStart==null) yawStart = now; else if((now - yawStart)/1000 > THRESH.HOLD_SEC) yawAlertText = headLR; } else yawStart=null;
+          }
+          if(Number.isFinite(pitch)){
+            if(pitch > THRESH.PITCH_DOWN) headUD = 'Head Down';
+            else if(pitch < THRESH.PITCH_UP) headUD = 'Head Up';
+            else headUD = 'Center';
+            if(headUD !== 'Center'){ if(pitchStart==null) pitchStart = now; else if((now - pitchStart)/1000 > THRESH.HOLD_SEC) pitchAlertText = headUD; } else pitchStart=null;
+          }
+        } else {
+          ctx.clearRect(0,0,canvas.width,canvas.height); yawStart=null; pitchStart=null;
+          dbgMode.textContent = 'matrix: waiting (no face)';
+        }
+
+        const {count, both} = handsAboveFace(hands, face);
+        handStatus = count? `${count} Hand(s) Above Face` : `${hands.length} Hand(s)`;
+        if(both){ if(handsStart==null) handsStart = now; else if((now-handsStart)/1000 > THRESH.BOTH_HANDS_UP_SEC) handsAlert=true; } else handsStart=null;
+
+        // Phone detection (low‑rate)
+        frameCount++;
+        const phoneEnabled = !!(cbPhone && cbPhone.checked);
+        const requireHandOverlap = !!(cbPhoneWithHand && cbPhoneWithHand.checked);
+        let phoneBoxes = lastPhoneDetections;
+        if(phoneEnabled && phoneReady && (frameCount % THRESH.PHONE_CADENCE === 0)){
+          const r = objDetector.detectForVideo(video, now);
+          const boxes = [];
+          for(const det of (r?.detections || [])){
+            const cat = det.categories?.[0]; if(!cat) continue;
+            const name = (cat.categoryName||"").toLowerCase(); if(name !== "cell phone") continue;
+            const bb = det.boundingBox;
+            boxes.push({ xMin: bb.originX, yMin: bb.originY, xMax: bb.originX + bb.width, yMax: bb.originY + bb.height, score: cat.score || 0 });
+          }
+          phoneBoxes = boxes; lastPhoneDetections = boxes;
+        }
+        if(phoneBoxes?.length){
+          ctx.save(); ctx.lineWidth = 2; ctx.strokeStyle = "rgba(234,179,8,0.95)"; ctx.fillStyle = "rgba(234,179,8,0.15)";
+          for(const b of phoneBoxes){ const w = canvas.width; const bw = b.xMax - b.xMin; const bh = b.yMax - b.yMin; const mx = w - (b.xMin + bw); ctx.fillRect(mx, b.yMin, bw, bh); ctx.strokeRect(mx, b.yMin, bw, bh);} ctx.restore();
+        }
+
+        if(phoneEnabled && phoneBoxes?.length){
+          if(requireHandOverlap){
+            const w = canvas.width, h = canvas.height; let overlap = false;
+            for(const hnd of hands){ const pts = hnd.map(p=>({x:p.x*w, y:p.y*h})); for(const p of pts){ for(const b of phoneBoxes){ if(p.x>=b.xMin && p.x<=b.xMax && p.y>=b.yMin && p.y<=b.yMax){ overlap = true; break; } } if(overlap) break; } if(overlap) break; }
+            phone = overlap;
+          } else { phone = true; }
+        } else { phone = false; }
+        phoneAlert = phone;
+
+        updateUI({ pitch,yaw,headLR,headUD,eyeStatus,yawnStatus,handStatus,phone, eyeAlert,yawnAlert,handsAlert,phoneAlert, yawAlertText,pitchAlertText });
+
+      } catch(e){ console.error('loop error', e); }
+      finally { isBusy = false; requestAnimationFrame(loop); }
+    }
+
+    // ---------- Events ----------
+    btnToggle.addEventListener('click', async ()=>{
+      if(!isRunning){
+        [sndEyes,sndYawn,sndHands,sndPhone].forEach(a=>{ a.play().then(()=>{a.pause();a.currentTime=0;}).catch(()=>{}); });
+        try{
+          await startCam();
+          await initModels();
+          if(!modelsReady){ showToast('Models not ready', false); return; }
+          isRunning = true; btnToggle.textContent='Stop';
+          showToast('เริ่มการตรวจจับ');
+          frameCount = 0;
+          loop();
+        }catch(err){ console.error(err); showToast('เริ่มใช้งานไม่สำเร็จ: อนุญาตกล้อง/อินเทอร์เน็ต', false); }
+      } else {
+        isRunning = false; btnToggle.textContent='Start';
+        stopAll();
+        const s = video.srcObject; if(s){ s.getTracks().forEach(t=>t.stop()); video.srcObject=null; }
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        lastPhoneDetections = [];
+        showToast('หยุดการตรวจจับ');
+      }
+    });
+
+    btnCalib.addEventListener('click', ()=>{ if(pitchEMA==null || yawEMA==null){ showToast('ยังไม่พบใบหน้าเพื่อปรับเทียบ', false); return; } pitchOffset = Number.isFinite(pitchEMA)? pitchEMA:0; yawOffset = Number.isFinite(yawEMA)? yawEMA:0; showToast('Calibrated!'); });
+
+    btnFlipYaw.addEventListener('click', ()=>{ flipYaw = !flipYaw; btnFlipYaw.textContent = `Flip Yaw: ${flipYaw? 'ON':'OFF'}`; showToast(flipYaw ? 'Yaw “Flip ON” = บวก=ขวา, ลบ=ซ้าย' : 'Yaw “Flip OFF” = บวก=ซ้าย, ลบ=ขวา'); });
+
+    btnFlipPitch.addEventListener('click', ()=>{ flipPitch = !flipPitch; btnFlipPitch.textContent = `Flip Pitch: ${flipPitch? 'ON':'OFF'}`; showToast(flipPitch ? 'Pitch “Flip ON” = บวก=ก้ม, ลบ=เงย' : 'Pitch “Flip OFF” = บวก=เงย, ลบ=ก้ม'); });
+
+    cbHeadPose.addEventListener('change', setSafeBadge); fpsSel.addEventListener('change', ()=>{}); setSafeBadge();
+  </script>
+</body>
+</html>
