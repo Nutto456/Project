@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>Drowsiness Detection – Client Only + Phone (Mobile‑first • Auto‑scale)</title>
+  <link rel="icon" href="data:,">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --safe-inset-bottom: env(safe-area-inset-bottom); }
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; }
+    .video-wrap { position: relative; width: 100%; max-width: 960px; aspect-ratio: 3/4; }
+    /* Mobile: use full height viewport, keep aspect, crop with cover */
+    @media (max-width: 768px){
+      .video-wrap { max-width: 100%; aspect-ratio: unset; height: calc(100dvh - 220px); }
+    }
+    #video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+    #overlay { position: absolute; inset: 0; transform: scaleX(-1); }
+
+    /* Sticky action bar for phones */
+    .action-bar { position: sticky; bottom: 0; inset-inline: 0; padding-bottom: calc(var(--safe-inset-bottom) + .5rem); }
+
+    /* Small text tone */
+    .subtle { font-size:.80rem; color:#334155 }
+
+    /* Compact card spacing on phones */
+    .card { background: white; border-radius: 1rem; box-shadow: 0 8px 30px rgba(2,6,23,.06); }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+  <div id="toast" class="hidden fixed top-3 right-3 z-50 px-4 py-2 rounded-lg text-white shadow"></div>
+
+  <main class="mx-auto max-w-5xl p-4">
+    <header class="mb-3">
+      <h1 class="text-2xl md:text-3xl font-bold text-center">Drowsiness Detection (Client‑side)</h1>
+      <p class="text-center text-slate-600 text-sm">Mobile‑first • low‑latency • on‑device</p>
+    </header>
+
+    <section class="video-wrap mx-auto rounded-xl overflow-hidden bg-gray-200">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </section>
+
+    <!-- Status + Readouts -->
+    <section class="grid md:grid-cols-3 gap-4 mt-4">
+      <div id="alertBox" class="hidden md:col-span-1 card p-4 text-red-800 bg-red-50 font-semibold"></div>
+      <div class="md:col-span-2 card p-4">
+        <p class="font-bold flex flex-wrap items-center gap-2">
+          Status
+          <span id="safeBadge" class="px-2 py-1 rounded-full text-white text-xs bg-blue-600">Custom</span>
+          <span id="dbgMode" class="px-2 py-1 rounded-full text-xs bg-slate-200 text-slate-700">matrix: auto</span>
+          <span id="camBadge" class="px-2 py-1 rounded-full text-xs bg-slate-200 text-slate-700">cam: ?</span>
+          <span id="modelBadge" class="px-2 py-1 rounded-full text-xs bg-slate-200 text-slate-700">models: ?</span>
+          <span id="faceBadge" class="px-2 py-1 rounded-full text-xs bg-slate-200 text-slate-700">faces: 0</span>
+        </p>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 mt-2 text-sm md:text-base">
+          <div>Pitch: <span id="pitchOut" class="font-semibold">-</span></div>
+          <div>Yaw: <span id="yawOut" class="font-semibold">-</span></div>
+          <div>Head LR: <span id="headLROut" class="font-semibold">-</span></div>
+          <div>Head UD: <span id="headUDOut" class="font-semibold">-</span></div>
+          <div>Eyes: <span id="eyesOut" class="font-semibold">-</span></div>
+          <div>Yawn: <span id="yawnOut" class="font-semibold">-</span></div>
+          <div>Hands: <span id="handsOut" class="font-semibold">-</span></div>
+          <div>Phone: <span id="phoneOut" class="font-semibold">-</span></div>
+        </div>
+        <p class="subtle mt-2" id="scaleDbg">auto‑scale: yaw×1.00 pitch×1.00</p>
+      </div>
+    </section>
+
+    <!-- Controls / Performance / Tips -->
+    <section class="grid md:grid-cols-3 gap-4 mt-4">
+      <div class="card p-4">
+        <p class="font-bold mb-2">Controls</p>
+        <!-- Mobile first: big buttons, wrap; sticky on bottom on phones -->
+        <div class="action-bar bg-white/90 backdrop-blur rounded-xl border border-slate-200 p-3 flex flex-wrap gap-2 md:static md:border-0 md:bg-transparent md:p-0">
+          <button id="btnToggle" class="px-4 py-2 rounded-xl text-white bg-blue-600 hover:bg-blue-700 font-semibold shadow w-full md:w-auto">Start</button>
+          <button id="btnCalib" class="px-4 py-2 rounded-xl text-white bg-indigo-600 hover:bg-indigo-700 font-semibold shadow w-1/2 md:w-auto">Calibrate</button>
+          <button id="btnFlipYaw" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 font-semibold shadow w-1/2 md:w-auto">Flip Yaw: ON</button>
+          <button id="btnFlipPitch" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 font-semibold shadow w-1/2 md:w-auto">Flip Pitch: ON</button>
+          <button id="btnFullscreen" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 font-semibold shadow w-1/2 md:w-auto">Fullscreen</button>
+        </div>
+      </div>
+
+      <div class="card p-4">
+        <details open>
+          <summary class="font-bold mb-2 cursor-pointer select-none">Performance</summary>
+          <div class="space-y-2 text-sm">
+            <label class="flex items-center gap-2">
+              <input id="cbHeadPose" type="checkbox" class="scale-125" checked>
+              <span>Enable Head Pose (MediaPipe Matrix)</span>
+            </label>
+            <label class="flex items-center gap-2">
+              <input id="cbDrawPoints" type="checkbox" class="scale-125" checked>
+              <span>Draw face keypoints</span>
+            </label>
+            <label class="flex items-center gap-2">
+              <input id="cbPhone" type="checkbox" class="scale-125">
+              <span>Enable Phone Detector</span>
+            </label>
+            <label class="flex items-center gap-2 ml-6">
+              <input id="cbPhoneWithHand" type="checkbox" class="scale-125">
+              <span>Consider “Using Phone” only if hand overlaps phone</span>
+            </label>
+            <label class="flex items-center gap-2 mt-3">
+              <input id="cbAutoScale" type="checkbox" class="scale-125" checked>
+              <span>Auto‑scale yaw/pitch (landmark‑assisted)</span>
+            </label>
+
+            <div class="flex items-center gap-2 mt-3">
+              <label for="fps" class="whitespace-nowrap">FPS:</label>
+              <select id="fps" class="border rounded px-2 py-1">
+                <option>24</option>
+                <option selected>30</option>
+                <option>20</option>
+                <option>15</option>
+              </select>
+              <span class="subtle" id="cpuHint"></span>
+            </div>
+
+            <div class="flex items-center gap-2 mt-3">
+              <label for="poseGain" class="whitespace-nowrap">Pose Gain (all):</label>
+              <input id="poseGain" type="range" min="0.80" max="2.00" step="0.05" value="1.20" class="w-40">
+              <span id="poseGainLabel" class="tabular-nums">1.20×</span>
+            </div>
+            <div class="flex items-center gap-2 mt-3">
+              <label for="yawGain" class="whitespace-nowrap">Yaw Gain:</label>
+              <input id="yawGain" type="range" min="0.50" max="4.00" step="0.10" value="2.00" class="w-40">
+              <span id="yawGainLabel" class="tabular-nums">2.00×</span>
+            </div>
+            <div class="flex items-center gap-2 mt-2">
+              <label for="pitchGain" class="whitespace-nowrap">Pitch Gain:</label>
+              <input id="pitchGain" type="range" min="0.50" max="4.00" step="0.10" value="1.40" class="w-40">
+              <span id="pitchGainLabel" class="tabular-nums">1.40×</span>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="card p-4">
+        <details>
+          <summary class="font-bold mb-2 cursor-pointer select-none">Tips</summary>
+          <ul class="list-disc ml-5 text-sm text-slate-700 space-y-1">
+            <li>ถือเครื่องให้นิ่ง • ห้องสว่าง • กล้องหน้า</li>
+            <li>เริ่มด้วย Calibrate ขณะแหน่งศีรษะตรง</li>
+            <li>Flip Yaw/Pitch ถ้าทิศกลับใจ</li>
+            <li>ค่าน้อย/ช่วงไม่เท่ากัน → เปิด Auto‑scale หรือปรับ Yaw/Pitch Gain</li>
+            <li>Phone Detector: เปิดได้ แต่ตั้งค่าเป็น Low‑rate เพื่อลดผลกระทบกับมุมศีรษะ</li>
+          </ul>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <!-- sounds -->
+  <audio id="sndEyes"  src="./static/Sound/eyeclosed_alert.mp3" preload="auto"></audio>
+  <audio id="sndYawn"  src="./static/Sound/Yawn_alert.mp3" preload="auto"></audio>
+  <audio id="sndHands" src="./static/Sound/both_hand_alert.mp3" preload="auto"></audio>
+  <audio id="sndPhone" src="./static/Sound/phone_alert.mp3" preload="auto"></audio>
+
+  <script type="module">
+    import { FaceLandmarker, HandLandmarker, ObjectDetector, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+    // ---- Elements
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('overlay');
+    const ctx = canvas.getContext('2d');
+
+    const btnToggle = document.getElementById('btnToggle');
+    const btnCalib = document.getElementById('btnCalib');
+    const btnFlipYaw = document.getElementById('btnFlipYaw');
+    const btnFlipPitch = document.getElementById('btnFlipPitch');
+    const btnFullscreen = document.getElementById('btnFullscreen');
+
+    const cbHeadPose = document.getElementById('cbHeadPose');
+    const cbDrawPoints = document.getElementById('cbDrawPoints');
+    const cbPhone = document.getElementById('cbPhone');
+    const cbPhoneWithHand = document.getElementById('cbPhoneWithHand');
+    const cbAutoScale = document.getElementById('cbAutoScale');
+
+    const fpsSel = document.getElementById('fps');
+    const safeBadge = document.getElementById('safeBadge');
+    const dbgMode = document.getElementById('dbgMode');
+    const scaleDbg = document.getElementById('scaleDbg');
+    const camBadge = document.getElementById('camBadge');
+    const modelBadge = document.getElementById('modelBadge');
+    const faceBadge = document.getElementById('faceBadge');
+    const cpuHint = document.getElementById('cpuHint');
+
+    const poseGainEl = document.getElementById('poseGain');
+    const poseGainLabel = document.getElementById('poseGainLabel');
+    const yawGainEl = document.getElementById('yawGain');
+    const yawGainLabel = document.getElementById('yawGainLabel');
+    const pitchGainEl = document.getElementById('pitchGain');
+    const pitchGainLabel = document.getElementById('pitchGainLabel');
+
+    const pitchOut = document.getElementById('pitchOut');
+    const yawOut   = document.getElementById('yawOut');
+    const headLROut = document.getElementById('headLROut');
+    const headUDOut = document.getElementById('headUDOut');
+    const eyesOut  = document.getElementById('eyesOut');
+    const yawnOut  = document.getElementById('yawnOut');
+    const handsOut = document.getElementById('handsOut');
+    const phoneOut = document.getElementById('phoneOut');
+
+    const alertBox = document.getElementById('alertBox');
+    const toast = document.getElementById('toast');
+
+    const sndEyes  = document.getElementById('sndEyes');
+    const sndYawn  = document.getElementById('sndYawn');
+    const sndHands = document.getElementById('sndHands');
+    const sndPhone = document.getElementById('sndPhone');
+
+    // ---- Config (some will be adapted at runtime)
+    const THRESH = {
+      EYE_CLOSED: 0.13,         // will be adapted to baseline after warmup
+      YAWN: 0.60,               // adaptive baseline as well
+      EYE_CLOSED_SEC: 1.0,
+      YAWN_SEC: 2.5,
+      BOTH_HANDS_UP_SEC: 2,
+      PITCH_DOWN: 15,
+      PITCH_UP: -18,
+      YAW_LEFT: 25,
+      YAW_RIGHT: -25,
+      HOLD_SEC: 1.0,
+      PHONE_SCORE: 0.50,
+      PHONE_CADENCE: 12         // dynamically scaled by FPS later
+    };
+
+    // ---- State
+    let isRunning = false, isBusy = false, lastTick = 0;
+    let flipYaw = true, flipPitch = true;
+    let faceLandmarker, handLandmarker, objDetector;
+    let modelsReady = false, phoneReady = false;
+
+    let pitchOffset=0, yawOffset=0;
+    let pitchEMA=null, yawEMA=null, rollEMA=null;
+    let eyeStart=null, yawnStart=null, handsStart=null, yawStart=null, pitchStart=null;
+    let playing = new Set();
+
+    let frameCount = 0;
+    let lastPhoneDetections = [];
+
+    // Auto‑scale factors and adaptive baselines
+    let sYawAuto = 1.0, sPitchAuto = 1.0;
+    let warmupFrames = 90; // ~3s @30fps to learn baselines
+    let earBase = null, marBase = null;
+
+    // Median filters for extra stability on mobile
+    const winYaw = [], winPitch = []; const WIN = 5; // small window
+
+    // Wake lock handle (keep screen on during run)
+    let wakeLock = null;
+
+    // ---- Helpers
+    const ema = (p, v, a=0.35) => (!Number.isFinite(v) ? p : (p==null ? v : a*v + (1-a)*p));
+    const clamp = (v, lo, hi)=> Math.max(lo, Math.min(hi, v));
+    const rad2deg = (r)=> r*57.2957795;
+    const median = (arr)=>{ const a=[...arr].sort((x,y)=>x-y); const n=a.length; return n? (n%2? a[(n-1)/2] : (a[n/2-1]+a[n/2])/2) : null };
+    const showToast = (msg, ok=true)=>{ toast.textContent = msg; toast.className = `fixed top-3 right-3 z-50 px-4 py-2 rounded-lg text-white shadow ${ok?'bg-green-600':'bg-red-600'}`; toast.classList.remove('hidden'); setTimeout(()=> toast.classList.add('hidden'), 2200); };
+    function playLoop(id, el){ if(!playing.has(id)){ el.loop = true; el.play().catch(()=>{}); playing.add(id);} }
+    function stopLoop(id, el){ if(playing.has(id)){ el.pause(); el.currentTime = 0; playing.delete(id);} }
+    function stopAll(){ stopLoop('EYES',sndEyes); stopLoop('YAWN',sndYawn); stopLoop('HANDS',sndHands); stopLoop('PHONE',sndPhone); }
+
+    const L = { LEFT_EYE:[33,160,158,133,153,144], RIGHT_EYE:[263,387,385,362,380,373], MOUTH:[78,95,88,178,87,14,317,402,318,324,308,415,13,312,311,310,415,308,402,317] };
+    const dist = (a,b)=> Math.hypot(a.x-b.x, a.y-b.y);
+    const ear = (lm, idx)=> (dist(lm[idx[1]],lm[idx[5]])+dist(lm[idx[2]],lm[idx[4]])) / (2*dist(lm[idx[0]],lm[idx[3]]));
+    const mar = (lm, idx)=> (dist(lm[idx[13]],lm[idx[19]])+dist(lm[idx[14]],lm[idx[18]])) / (2*dist(lm[idx[12]],lm[idx[16]]));
+
+    function handsAboveFace(hands, face){
+      if(!hands?.length || !face?.length) return {count:0, both:false};
+      const faceMinY = Math.min(...face.map(p=>p.y));
+      let c=0; for(const h of hands){ const minY = Math.min(...h.map(p=>p.y)); if(minY < faceMinY) c++; }
+      return {count:c, both:c>=2};
+    }
+
+    function drawFewPoints(lm){
+      if(!cbDrawPoints || !cbDrawPoints.checked) return;
+      ctx.save(); ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = 'rgba(59,130,246,0.95)';
+      for(const i of [33,263,1,152,57,287]){ const p = lm[i]; ctx.beginPath(); ctx.arc(p.x*canvas.width, p.y*canvas.height, 3, 0, Math.PI*2); ctx.fill(); }
+      ctx.restore();
+    }
+
+    function setSafeBadge(){ const on = !cbHeadPose.checked; safeBadge.textContent = on ? "Safe Mode" : "Custom"; safeBadge.className = `px-2 py-1 rounded-full text-xs ${on ? 'bg-gray-800 text-white' : 'bg-blue-600 text-white'}`; }
+
+    // Matrix → Euler helpers
+    function eulerFromR(r){
+      const r00=r[0], r01=r[1], r02=r[2];
+      const r10=r[3], r11=r[4], r12=r[5];
+      const r20=r[6], r21=r[7], r22=r[8];
+      const sy = Math.hypot(r00,r10);
+      let pitch,yaw,roll;
+      if(sy>1e-6){ // XYZ convention: yaw(Y), pitch(X), roll(Z)
+        pitch = Math.atan2(-r20, sy);
+        yaw   = Math.atan2(r10, r00);
+        roll  = Math.atan2(r21, r22);
+      }else{
+        pitch = Math.atan2(-r20, sy);
+        yaw   = Math.atan2(-r01, r11);
+        roll  = 0;
+      }
+      return {pitch:rad2deg(pitch), yaw:rad2deg(yaw), roll:rad2deg(roll)};
+    }
+    function poseFromMatrixAuto(m4){
+      if(!m4) return null;
+      const arr = Array.from(m4); if(arr.length<16) return null;
+      const R_row = [arr[0],arr[1],arr[2], arr[4],arr[5],arr[6], arr[8],arr[9],arr[10]];
+      const R_col = [arr[0],arr[4],arr[8], arr[1],arr[5],arr[9], arr[2],arr[6],arr[10]];
+      const e_row = eulerFromR(R_row); const e_col = eulerFromR(R_col);
+      const magRow = Math.abs(e_row.pitch)+Math.abs(e_row.yaw)+Math.abs(e_row.roll);
+      const magCol = Math.abs(e_col.pitch)+Math.abs(e_col.yaw)+Math.abs(e_col.roll);
+      const useCol = magCol > magRow*1.1; dbgMode.textContent = `matrix: ${useCol?'col-major':'row-major'}`;
+      const e = useCol? e_col : e_row;
+      return { pitch: clamp(e.pitch, -60, 60), yaw: clamp(e.yaw, -90, 90), roll: clamp(e.roll, -60, 60) };
+    }
+
+    // Landmark heuristic pose (for fallback & auto-scale reference)
+    function poseSimple(lm){
+      const Leye = lm[33], Reye=lm[263], Nose=lm[1];
+      if(!Leye||!Reye||!Nose) return null;
+      const midX = (Leye.x+Reye.x)/2, midY=(Leye.y)/2 + (Reye.y)/2;
+      const yaw = (Nose.x - midX) * 260;     // heuristic scale
+      const pitch = (midY - Nose.y) * 360;   // heuristic scale
+      return {pitch:clamp(pitch,-60,60), yaw:clamp(yaw,-90,90), roll:0};
+    }
+
+    // ---- Init
+    async function initModels(){
+      if(modelsReady) return;
+      const resolver = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+      faceLandmarker = await FaceLandmarker.createFromOptions(resolver, {
+        baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task" },
+        numFaces:1, runningMode:"VIDEO",
+        outputFaceBlendshapes:false,
+        outputFacialTransformationMatrixes:true
+      });
+      // On mobile, allow 1 hand to reduce load; desktop: 2
+      const maxHands = matchMedia('(max-width: 768px)').matches ? 1 : 2;
+      handLandmarker = await HandLandmarker.createFromOptions(resolver, {
+        baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task" },
+        numHands:maxHands, runningMode:"VIDEO"
+      });
+      objDetector = await ObjectDetector.createFromOptions(resolver, {
+        baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float32/1/efficientdet_lite0.tflite" },
+        scoreThreshold: THRESH.PHONE_SCORE, runningMode: "VIDEO", maxResults: 5
+      });
+      modelsReady = true; phoneReady = true;
+      modelBadge.textContent = 'models: ok';
+      modelBadge.className = 'px-2 py-1 rounded-full text-xs bg-green-600 text-white';
+    }
+
+    async function startCam(){
+      try{
+        const mobile = matchMedia('(max-width: 768px)').matches;
+        const constraints = mobile ? { facingMode:"user", width:{ideal:1280}, height:{ideal:720}, frameRate:{ideal:30, max:30} } : { facingMode:"user", width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:60} };
+        const st = await navigator.mediaDevices.getUserMedia({ video: constraints, audio:false });
+        video.srcObject = st;
+        await new Promise(res => { if(video.readyState >= 1) res(); else video.onloadedmetadata = () => res(); });
+        await video.play();
+        resizeCanvas();
+        camBadge.textContent = 'cam: ok';
+        camBadge.className = 'px-2 py-1 rounded-full text-xs bg-green-600 text-white';
+      }catch(err){
+        console.error(err);
+        showToast('ไม่สามารถเปิดกล้องได้: อนุญาตการใช้งานกล้อง', false);
+        camBadge.textContent = 'cam: blocked';
+        camBadge.className = 'px-2 py-1 rounded-full text-xs bg-red-600 text-white';
+        throw err;
+      }
+    }
+
+    function resizeCanvas(){
+      const w = video.videoWidth || 640, h = video.videoHeight || 480;
+      canvas.width = w; canvas.height = h;
+    }
+    window.addEventListener('resize', ()=>{ if(video?.videoWidth) resizeCanvas(); });
+
+    async function requestWakeLock(){
+      try{ wakeLock = await navigator.wakeLock?.request('screen'); }catch{ /* ignore */ }
+    }
+
+    // ---- UI update
+    function updateUI(v){
+      const fmt = (x)=> Number.isFinite(x) ? x.toFixed(1) : "-";
+      pitchOut.textContent = fmt(v.pitch);
+      yawOut.textContent   = fmt(v.yaw);
+      headLROut.textContent = v.headLR ?? "-";
+      headUDOut.textContent = v.headUD ?? "-";
+      eyesOut.textContent  = v.eyeStatus ?? "-";
+      yawnOut.textContent  = v.yawnStatus ?? "-";
+      handsOut.textContent = v.handStatus ?? "-";
+      phoneOut.textContent = v.phone ? "Yes":"No";
+
+      const alerts = [];
+      if(v.eyeAlert) alerts.push("Eyes Closed!");
+      if(v.yawnAlert) alerts.push("Yawning!");
+      if(v.handsAlert) alerts.push("Both Hands Up!");
+      if(v.phoneAlert) alerts.push("Using Phone!");
+      if(v.yawAlertText) alerts.push(v.yawAlertText);
+      if(v.pitchAlertText) alerts.push(v.pitchAlertText);
+
+      if(alerts.length){ alertBox.classList.remove('hidden'); alertBox.innerHTML = alerts.map(a=>`<p>${a}</p>`).join(''); }
+      else { alertBox.classList.add('hidden'); alertBox.innerHTML=''; }
+
+      alerts.includes('Eyes Closed!')   ? playLoop('EYES',sndEyes)   : stopLoop('EYES',sndEyes);
+      alerts.includes('Yawning!')       ? playLoop('YAWN',sndYawn)   : stopLoop('YAWN',sndYawn);
+      alerts.includes('Both Hands Up!') ? playLoop('HANDS',sndHands) : stopLoop('HANDS',sndHands);
+      alerts.includes('Using Phone!')   ? playLoop('PHONE',sndPhone) : stopLoop('PHONE',sndPhone);
+    }
+
+    // ---- Loop helpers
+    const getFPS = () => Number(fpsSel.value)||30;
+
+    function pushMedian(win, v){ if(!Number.isFinite(v)) return v; win.push(v); if(win.length>WIN) win.shift(); return median(win) ?? v; }
+
+    function adaptCpu(now){ // adapt FPS hint and phone cadence
+      const fps = getFPS();
+      const cadence = Math.max(8, Math.round((fps/30)*THRESH.PHONE_CADENCE));
+      THRESH.PHONE_CADENCE = cadence;
+      cpuHint.textContent = `• phone every ${cadence}f`;
+    }
+
+    // Prefer rVFC if available for tighter sync on mobile Safari/Chrome
+    const rVFC = video.requestVideoFrameCallback?.bind(video);
+
+    function scheduleNext(loopFn){
+      if(rVFC) rVFC(()=> loopFn()); else requestAnimationFrame(loopFn);
+    }
+
+    async function loop(){
+      if(!isRunning) return;
+      const now = performance.now();
+      const budget = 1000/getFPS();
+      if(now - lastTick < budget){ return scheduleNext(loop); }
+      lastTick = now; if(isBusy){ return scheduleNext(loop); }
+      isBusy = true; adaptCpu(now);
+
+      try{
+        const resF = faceLandmarker?.detectForVideo?.(video, now);
+        const resH = handLandmarker?.detectForVideo?.(video, now);
+        const facesCount = resF?.faceLandmarks?.length || 0;
+        faceBadge.textContent = `faces: ${facesCount}`;
+
+        const face = resF?.faceLandmarks?.[0] || null;
+        const hands = (resH?.landmarks||[]).map(x=>x);
+
+        let pitch=null, yaw=null, roll=null;
+        let eyeStatus='-', yawnStatus='-', handStatus='No Hands';
+        let eyeAlert=false, yawnAlert=false, handsAlert=false, phoneAlert=false, phone=false;
+        let headLR='Center', headUD='Center', yawAlertText='', pitchAlertText='';
+
+        if(!cbDrawPoints || !cbDrawPoints.checked) ctx.clearRect(0,0,canvas.width,canvas.height);
+
+        if(face){
+          if(cbDrawPoints.checked) drawFewPoints(face);
+
+          if(cbHeadPose.checked){
+            const m4 = resF?.facialTransformationMatrixes?.[0];
+            let pose = poseFromMatrixAuto(m4) || poseSimple(face);
+            if(pose){
+              const rawPitch = pose.pitch; const rawYaw = pose.yaw;
+
+              // auto-scale based on landmark heuristic reference
+              if(cbAutoScale.checked){
+                const heur = poseSimple(face);
+                if(heur){
+                  const ry = clamp(Math.abs(heur.yaw)/(Math.abs(rawYaw)+1e-3), 0.5, 6.0);
+                  const rp = clamp(Math.abs(heur.pitch)/(Math.abs(rawPitch)+1e-3), 0.5, 6.0);
+                  sYawAuto = ema(sYawAuto, ry, 0.08);
+                  sPitchAuto = ema(sPitchAuto, rp, 0.08);
+                }
+              }
+
+              pitchEMA = ema(pitchEMA, rawPitch);
+              yawEMA   = ema(yawEMA,   rawYaw);
+              rollEMA  = ema(rollEMA,  pose.roll);
+
+              const pVal = Number.isFinite(pitchEMA) ? pitchEMA : 0;
+              const yVal = Number.isFinite(yawEMA) ? yawEMA : 0;
+
+              const yScale = (Number(poseGainEl.value)||1.2) * (Number(yawGainEl.value)||2.0) * (cbAutoScale.checked ? sYawAuto : 1);
+              const pScale = (Number(poseGainEl.value)||1.2) * (Number(pitchGainEl.value)||1.4) * (cbAutoScale.checked ? sPitchAuto : 1);
+
+              pitch = clamp((pVal - pitchOffset) * pScale, -60, 60);
+              yaw   = clamp((yVal - yawOffset) * yScale,  -90, 90);
+
+              if(flipYaw)   yaw   = -yaw;
+              if(flipPitch) pitch = -pitch;
+
+              // Median filter for extra stability on mobile
+              pitch = pushMedian(winPitch, pitch);
+              yaw   = pushMedian(winYaw, yaw);
+
+              scaleDbg.textContent = `auto‑scale: yaw×${(sYawAuto||1).toFixed(2)} pitch×${(sPitchAuto||1).toFixed(2)}`;
+            }
+          }
+
+          // Eyes / Yawn with adaptive baselines (computed during warmup)
+          const EAR = ear(face, L.LEFT_EYE) * 0.5 + ear(face, L.RIGHT_EYE) * 0.5;
+          const MAR = mar(face, L.MOUTH);
+          if(warmupFrames>0){
+            earBase = ema(earBase, EAR, 0.05);
+            marBase = ema(marBase, MAR, 0.05);
+            warmupFrames--;
+          }
+          const eyeCut = earBase? Math.max(0.08, earBase*0.65) : THRESH.EYE_CLOSED;
+          const yawnCut = marBase? Math.max(0.45, marBase*1.35) : THRESH.YAWN;
+
+          if(EAR < eyeCut){ if(eyeStart==null) eyeStart = now; else if((now-eyeStart)/1000 > THRESH.EYE_CLOSED_SEC) eyeAlert = true; eyesOut && (eyeStatus='Eyes Closed'); }
+          else { eyeStatus='Eyes Open'; eyeStart=null; }
+
+          if(MAR > yawnCut){ if(yawnStart==null) yawnStart = now; else if((now-yawnStart)/1000 > THRESH.YAWN_SEC) yawnAlert = true; yawnStatus='Yawning'; }
+          else { yawnStatus='No Yawn'; yawnStart=null; }
+
+          if(Number.isFinite(yaw)){
+            if(yaw > Math.abs(THRESH.YAW_LEFT)) headLR = 'Turn Right';
+            else if(yaw < THRESH.YAW_RIGHT) headLR = 'Turn Left';
+            else headLR = 'Center';
+            if(headLR !== 'Center'){ if(yawStart==null) yawStart = now; else if((now - yawStart)/1000 > THRESH.HOLD_SEC) yawAlertText = headLR; } else yawStart=null;
+          }
+          if(Number.isFinite(pitch)){
+            if(pitch > THRESH.PITCH_DOWN) headUD = 'Head Down';
+            else if(pitch < THRESH.PITCH_UP) headUD = 'Head Up';
+            else headUD = 'Center';
+            if(headUD !== 'Center'){ if(pitchStart==null) pitchStart = now; else if((now - pitchStart)/1000 > THRESH.HOLD_SEC) pitchAlertText = headUD; } else pitchStart=null;
+          }
+        } else {
+          ctx.clearRect(0,0,canvas.width,canvas.height);
+          yawStart=null; pitchStart=null;
+          dbgMode.textContent = 'matrix: waiting (no face)';
+        }
+
+        const {count, both} = handsAboveFace(hands, face);
+        handStatus = count? `${count} Hand(s) Above Face` : `${hands.length} Hand(s)`;
+        if(both){ if(handsStart==null) handsStart = now; else if((now-handsStart)/1000 > THRESH.BOTH_HANDS_UP_SEC) handsAlert=true; } else handsStart=null;
+
+        // Phone detection (low‑rate)
+        frameCount++;
+        const phoneEnabled = !!(cbPhone && cbPhone.checked);
+        const requireHandOverlap = !!(cbPhoneWithHand && cbPhoneWithHand.checked);
+        let phoneBoxes = lastPhoneDetections;
+        if(phoneEnabled && phoneReady && (frameCount % THRESH.PHONE_CADENCE === 0)){
+          const r = objDetector.detectForVideo(video, now);
+          const boxes = [];
+          for(const det of (r?.detections || [])){
+            const cat = det.categories?.[0]; if(!cat) continue;
+            const name = (cat.categoryName||"").toLowerCase(); if(name !== "cell phone") continue;
+            const bb = det.boundingBox;
+            boxes.push({ xMin: bb.originX, yMin: bb.originY, xMax: bb.originX + bb.width, yMax: bb.originY + bb.height, score: cat.score || 0 });
+          }
+          phoneBoxes = boxes; lastPhoneDetections = boxes;
+        }
+        if(phoneBoxes?.length){
+          ctx.save(); ctx.lineWidth = 2; ctx.strokeStyle = "rgba(234,179,8,0.95)"; ctx.fillStyle = "rgba(234,179,8,0.15)";
+          for(const b of phoneBoxes){ const w = canvas.width; const bw = b.xMax - b.xMin; const bh = b.yMax - b.yMin; const mx = w - (b.xMin + bw); ctx.fillRect(mx, b.yMin, bw, bh); ctx.strokeRect(mx, b.yMin, bw, bh);} ctx.restore();
+        }
+
+        if(phoneEnabled && phoneBoxes?.length){
+          if(requireHandOverlap){
+            const w = canvas.width, h = canvas.height; let overlap = false;
+            for(const hnd of hands){ const pts = hnd.map(p=>({x:p.x*w, y:p.y*h})); for(const p of pts){ for(const b of phoneBoxes){ if(p.x>=b.xMin && p.x<=b.xMax && p.y>=b.yMin && p.y<=b.yMax){ overlap = true; break; } } if(overlap) break; } if(overlap) break; }
+            phone = overlap;
+          } else { phone = true; }
+        } else { phone = false; }
+        phoneAlert = phone;
+
+        updateUI({ pitch,yaw,headLR,headUD,eyeStatus,yawnStatus,handStatus,phone, eyeAlert,yawnAlert,handsAlert,phoneAlert, yawAlertText,pitchAlertText });
+
+      } catch(e){ console.error('loop error', e); }
+      finally { isBusy = false; scheduleNext(loop); }
+    }
+
+    // ---- Events
+    // Sync labels
+    const syncRange = (el, label)=>{ const v=Number(el.value); label.textContent = `${(Number.isFinite(v)? v:1).toFixed(2)}×`; };
+    poseGainEl?.addEventListener('input', ()=> syncRange(poseGainEl, poseGainLabel)); syncRange(poseGainEl, poseGainLabel);
+    yawGainEl?.addEventListener('input',  ()=> syncRange(yawGainEl, yawGainLabel));  syncRange(yawGainEl, yawGainLabel);
+    pitchGainEl?.addEventListener('input',()=> syncRange(pitchGainEl, pitchGainLabel));syncRange(pitchGainEl, pitchGainLabel);
+
+    // Defaults: Flip ON for mobile intuition
+    if (btnFlipYaw) btnFlipYaw.textContent = 'Flip Yaw: ON';
+    if (btnFlipPitch) btnFlipPitch.textContent = 'Flip Pitch: ON';
+
+    btnToggle.addEventListener('click', async ()=>{
+      if(!isRunning){
+        [sndEyes,sndYawn,sndHands,sndPhone].forEach(a=>{ a.play().then(()=>{a.pause();a.currentTime=0;}).catch(()=>{}); });
+        try{
+          await startCam();
+          await initModels();
+          await requestWakeLock();
+          if(!modelsReady){ showToast('Models not ready', false); return; }
+          // reset adaptive state
+          warmupFrames = 90; earBase=null; marBase=null; winYaw.length=0; winPitch.length=0;
+          isRunning = true; btnToggle.textContent='Stop';
+          showToast('เริ่มการตรวจจับ');
+          frameCount = 0;
+          scheduleNext(loop);
+        }catch(err){ console.error(err); showToast('เริ่มใช้งานไม่สำเร็จ: อนุญาตกล้อง/อินเทอร์เน็ต', false); }
+      } else {
+        isRunning = false; btnToggle.textContent='Start';
+        stopAll();
+        try{ await wakeLock?.release?.(); }catch{}
+        const s = video.srcObject; if(s){ s.getTracks().forEach(t=>t.stop()); video.srcObject=null; }
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        lastPhoneDetections = [];
+        showToast('หยุดการตรวจจับ');
+      }
+    });
+
+    btnCalib.addEventListener('click', ()=>{
+      if(pitchEMA==null || yawEMA==null){ showToast('ยังไม่พบใบหน้าเพื่อปรับเทียบ', false); return; }
+      pitchOffset = Number.isFinite(pitchEMA)? pitchEMA:0; yawOffset = Number.isFinite(yawEMA)? yawEMA:0; showToast('Calibrated!');
+    });
+
+    btnFlipYaw.addEventListener('click', ()=>{ flipYaw = !flipYaw; btnFlipYaw.textContent = `Flip Yaw: ${flipYaw? 'ON':'OFF'}`; showToast(flipYaw ? 'Yaw “Flip ON” = บวก=ขวา, ลบ=ซ้าย' : 'Yaw “Flip OFF” = บวก=ซ้าย, ลบ=ขวา'); });
+    btnFlipPitch.addEventListener('click', ()=>{ flipPitch = !flipPitch; btnFlipPitch.textContent = `Flip Pitch: ${flipPitch? 'ON':'OFF'}`; showToast(flipPitch ? 'Pitch “Flip ON” = บวก=ก้ม, ลบ=เงย' : 'Pitch “Flip OFF” = บวก=เงย, ลบ=ก้ม'); });
+
+    btnFullscreen.addEventListener('click', async ()=>{
+      const el = document.documentElement; try{ if(!document.fullscreenElement){ await el.requestFullscreen?.(); } else { await document.exitFullscreen?.(); } }catch{}
+    });
+
+    cbHeadPose.addEventListener('change', setSafeBadge);
+    fpsSel.addEventListener('change', ()=>{});
+    setSafeBadge();
+  </script>
+</body>
+</html>
