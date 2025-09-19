@@ -17,21 +17,8 @@
     .status-badge { display: flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 999px; }
     .indicator-group { position: fixed; top: 1rem; right: 1rem; z-index: 50; display: flex; gap: 0.5rem; padding: 0.5rem; background-color: rgba(0, 0, 0, 0.5); backdrop-filter: blur(8px); border-radius: 0.5rem; }
     .indicator-group svg { color: white; }
-    .alert-popup { 
-      position: fixed; 
-      inset: 0; 
-      z-index: 50; 
-      display: none; 
-      align-items: center; 
-      justify-content: center; 
-      padding: 1rem; 
-      background-color: rgba(0, 0, 0, 0.7); 
-      backdrop-filter: blur(4px);
-      pointer-events: none;
-    }
-    .alert-popup.show { 
-      display: flex;
-    }
+    .alert-popup { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; padding: 1rem; background-color: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); }
+    .alert-popup.show { display: flex; }
     .alert-popup .card { padding: 1.5rem; border-radius: 1.5rem; text-align: center; box-shadow: 0 10px 15px rgba(0,0,0,0.1); }
     .alert-popup .card.success { background-color: #10b981; }
     .alert-popup .card.error { background-color: #dc2626; }
@@ -80,6 +67,11 @@
     </section>
   </main>
 
+  <audio id="sndEyes"  src="./static/Sound/eyeclosed_alert.mp3" preload="auto"></audio>
+  <audio id="sndYawn"  src="./static/Sound/Yawn_alert.mp3" preload="auto"></audio>
+  <audio id="sndHands" src="./static/Sound/both_hand_alert.mp3" preload="auto"></audio>
+  <audio id="sndPhone" src="./static/Sound/phone_alert.mp3" preload="auto"></audio>
+
   <script type="module">
     import { FaceLandmarker, HandLandmarker, ObjectDetector, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
@@ -96,23 +88,29 @@
 
     const eyesStatusIcon = document.getElementById('eyesStatus');
     const phoneStatusIcon = document.getElementById('phoneStatus');
+    const handsStatusIcon = document.getElementById('handsStatus');
     const wheelStatusIcon = document.getElementById('wheelStatus');
     
+    const sndEyes  = document.getElementById('sndEyes');
+    const sndYawn  = document.getElementById('sndYawn');
+    const sndHands = document.getElementById('sndHands');
+    const sndPhone = document.getElementById('sndPhone');
+
     // === Config
     const THRESH = {
       EYE_CLOSED: 0.13,
-      YAWN: 0.60,
+      YAWN: 0.50, // ปรับลดลงเพื่อให้ทำงานได้ดีขึ้นบนมือถือ
       EYE_CLOSED_SEC: 1.0,
-      YAWN_SEC: 2.0,
-      BOTH_HANDS_UP_SEC: 2,
-      PITCH_DOWN: 5, // Adjusted threshold
-      PITCH_UP: -10, // Adjusted threshold
-      YAW_LEFT: 5,  // Adjusted threshold
-      YAW_RIGHT: -10, // Adjusted threshold
+      YAWN_SEC: 1.5, // ลดเวลาลงเพื่อให้แจ้งเตือนเร็วขึ้น
+      BOTH_HANDS_UP_SEC: 2, // ไม่ได้ใช้แล้ว
+      PITCH_DOWN: 5,
+      PITCH_UP: -10,
+      YAW_LEFT: 8,
+      YAW_RIGHT: -10,
       HOLD_SEC: 1.0,
       PHONE_SCORE: 0.50,
       PHONE_CADENCE: 12,
-      WHEEL_OFF_ALERT_SEC: 3,
+      WHEEL_OFF_ALERT_SEC: 2, // ลดเวลาลงเพื่อให้แจ้งเตือนเร็วขึ้น
       FACE_LOST_ALERT_SEC: 2.0
     };
     
@@ -138,6 +136,9 @@
     const ema = (p,v,a=0.35)=>(!Number.isFinite(v)?p:(p==null?v:a*v+(1-a)*p));
     const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
     const rad2deg=(r)=>r*57.2957795;
+    function playLoop(id, el){ el.loop=true; el.play().catch(()=>{}); }
+    function stopLoop(id, el){ el.pause(); el.currentTime=0; }
+    function stopAll(){ stopLoop('EYES',sndEyes); stopLoop('YAWN',sndYawn); stopLoop('PHONE',sndPhone); stopLoop('WHEEL',sndHands); } // ลบ stopLoop 'HANDS'
     
     // Face indices
     const EYE_L = [33,160,158,133,153,144];
@@ -172,7 +173,7 @@
       const resolver = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
       faceLandmarker = await FaceLandmarker.createFromOptions(resolver,{
         baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task" },
-        numFaces:1, runningMode:"VIDEO", outputFaceBlendshapes:false, outputFacialTransformationMatrixes:true
+        numFaces:1, runningMode:"VIDEO", outputFaceBlendshapes:true, outputFacialTransformationMatrixes:true
       });
       handLandmarker = await HandLandmarker.createFromOptions(resolver,{
         baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task" },
@@ -211,6 +212,7 @@
       
       eyesStatusIcon.style.backgroundColor = '';
       phoneStatusIcon.style.backgroundColor = '';
+      handsStatusIcon.style.backgroundColor = '';
       wheelStatusIcon.style.backgroundColor = '';
       
       alertCard.classList.remove('success');
@@ -247,8 +249,13 @@
       if(alerts.length){
         alertText.textContent = alerts.join(' / ');
         alertBox.classList.add('show');
+        if(v.eyeAlert) playLoop('EYES',sndEyes); else stopLoop('EYES',sndEyes);
+        if(v.yawnAlert) playLoop('YAWN',sndYawn); else stopLoop('YAWN',sndYawn);
+        if(v.phoneAlert) playLoop('PHONE',sndPhone); else stopLoop('PHONE',sndPhone);
+        if(v.wheelAlert) playLoop('WHEEL',sndHands);
       } else {
         alertBox.classList.remove('show');
+        stopAll();
       }
     }
 
@@ -282,19 +289,15 @@
           const m4 = resF?.facialTransformationMatrixes?.[0];
           let pose = poseFromMatrixAuto(m4) || poseSimple(face);
           if(pose){
-            // Use EMA for smoothing the calibrated values
             pitchEMA=ema(pitchEMA, pose.pitch);
             yawEMA=ema(yawEMA, pose.yaw);
 
-            // Calibrate and apply gain
             const calibratedPitch = (pitchEMA - pitchOffset) * poseGain * pitchGain;
             const calibratedYaw = (yawEMA - yawOffset) * poseGain * yawGain;
 
-            // Flip yaw/pitch for a more natural feel
             const finalPitch = -calibratedPitch;
             const finalYaw = calibratedYaw;
 
-            // Head pose alerts
             if (finalYaw > THRESH.YAW_LEFT) {
                 yawAlertText = 'หันซ้าย';
             } else if (finalYaw < THRESH.YAW_RIGHT) {
@@ -320,7 +323,25 @@
           if(!faceLastSeen) faceLastSeen = t;
           faceLost = (t - faceLastSeen > THRESH.FACE_LOST_ALERT_SEC);
         }
+
+        const handsCount = resH?.landmarks?.length || 0;
         
+        // --- Wheel Detection Logic (Updated)
+        handsStatusIcon.style.backgroundColor = ''; // Reset hands icon
+        if (handsCount > 0) {
+            handsStatusIcon.style.backgroundColor = '#22c55e'; // Green when hands detected
+            wheelStatusIcon.style.backgroundColor = '#22c55e'; // Green
+            wheelOffStart = null;
+        } else {
+            wheelStatusIcon.style.backgroundColor = '';
+            if (wheelOffStart === null) {
+                wheelOffStart = now;
+            }
+            if ((now - wheelOffStart) / 1000 > THRESH.WHEEL_OFF_ALERT_SEC) {
+                wheelAlert = true;
+            }
+        }
+
         frameCount++;
         let phoneBoxes = lastPhoneDetections;
         if(phoneReady && (frameCount % THRESH.PHONE_CADENCE === 0)){
@@ -335,21 +356,6 @@
         }
         if(phoneBoxes?.length){ phone = true; } else { phone=false; }
         phoneAlert = phone;
-        
-        // --- Wheel Detection
-        if (hands.length > 0) {
-            wheelOffStart = null;
-            wheelAlert = false;
-        } else {
-            if (wheelOffStart === null) {
-                wheelOffStart = now;
-            }
-            if ((now - wheelOffStart) / 1000 > THRESH.WHEEL_OFF_ALERT_SEC) {
-                wheelAlert = true;
-            } else {
-                wheelAlert = false;
-            }
-        }
         
         updateStatusIcons({ eyeAlert, yawnAlert, phoneAlert, wheelAlert, faceLost, yawAlertText, pitchAlertText });
 
@@ -378,7 +384,6 @@
         }
 
         if(!got){
-          alertBox.classList.remove('active');
           alertText.textContent = 'ไม่พบหน้า • ขยับให้อยู่กลางภาพ/เพิ่มแสง';
           alertCard.classList.remove('success');
           alertCard.classList.add('error');
@@ -387,7 +392,6 @@
         }
         pitchOffset = lastPose.pitch; yawOffset = lastPose.yaw; calibrated = true; btnToggle.disabled = false;
         canvas.style.outline = '3px solid #10b981'; setTimeout(()=>{ canvas.style.outline = 'none'; }, 520);
-        alertBox.classList.remove('active');
         alertText.textContent = 'Calibrated! พร้อมเริ่มใช้งาน';
         alertCard.classList.remove('error');
         alertCard.classList.add('success');
@@ -398,11 +402,11 @@
 
     btnToggle.addEventListener('click', async ()=>{
       if(!isRunning){
+        [sndEyes,sndYawn,sndHands,sndPhone].forEach(a=>{ a.play().then(()=>{a.pause();a.currentTime=0;}).catch(()=>{}); });
         try{
           if(!video.srcObject) await startCam();
           if(!modelsReady) await initModels();
           if(!calibrated){ 
-            alertBox.classList.remove('active');
             alertText.textContent = 'กด Calibrate ก่อนเริ่ม';
             alertCard.classList.remove('success');
             alertCard.classList.add('error');
@@ -414,7 +418,6 @@
           scheduleNext(loop);
         }catch(err){ 
           console.error(err);
-          alertBox.classList.remove('active');
           alertText.textContent = 'เริ่มไม่สำเร็จ: อนุญาตกล้อง/อินเทอร์เน็ต';
           alertCard.classList.remove('success');
           alertCard.classList.add('error');
@@ -422,9 +425,9 @@
         }
       } else {
         isRunning = false; btnToggle.textContent='Start';
+        stopAll();
         const s = video.srcObject; if(s){ s.getTracks().forEach(t=>t.stop()); video.srcObject=null; }
         ctx.clearRect(0,0,canvas.width,canvas.height);
-        alertBox.classList.remove('active');
         alertText.textContent = 'หยุดการตรวจจับ';
         alertCard.classList.remove('success');
         alertCard.classList.add('error');
