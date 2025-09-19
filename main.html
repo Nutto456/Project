@@ -27,7 +27,7 @@
       padding: 1rem; 
       background-color: rgba(0, 0, 0, 0.7); 
       backdrop-filter: blur(4px);
-      pointer-events: none; /* Add this line */
+      pointer-events: none;
     }
     .alert-popup.show { 
       display: flex;
@@ -60,9 +60,6 @@
       </div>
       <div id="phoneStatus" class="status-badge bg-green-500">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 text-white"><path fill-rule="evenodd" d="M1.5 4.5a3 3 0 013-3h15a3 3 0 013 3v13.5a3 3 0 01-3 3h-15a3 3 0 01-3-3V4.5zM15 15.75a.75.75 0 00.75.75h2.25a.75.75 0 00.75-.75V8.25a.75.75 0 00-.75-.75H15a.75.75 0 00-.75.75v7.5z" clip-rule="evenodd" /></svg>
-      </div>
-      <div id="handsStatus" class="status-badge bg-green-500">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 text-white"><path fill-rule="evenodd" d="M11.484 2.17a.75.75 0 01.022 1.063L5.55 11.25a3 3 0 00-1.757 2.252l-.64 3.425a.75.75 0 01-1.096.38l-1.11-1.11a.75.75 0 01.38-1.096l3.425-.641a3 3 0 002.252-1.757l8.02-8.02A.75.75 0 0121.83 2.5l-2.75 2.75a.75.75 0 01-1.06-.022zM21 12a.75.75 0 01-.75.75h-3.5a.75.75 0 010-1.5h3.5A.75.75 0 0121 12zM15 18a.75.75 0 01-.75.75H12a.75.75 0 010-1.5h2.25A.75.75 0 0115 18zM18 15a.75.75 0 01-.75.75H15a.75.75 0 010-1.5h2.25A.75.75 0 0118 15zM6.75 19.5a.75.75 0 01.75-.75h2.25a.75.75 0 010 1.5H7.5a.75.75 0 01-.75-.75z" clip-rule="evenodd" /><path d="M16.5 7.5a.75.75 0 01.75-.75h.75a.75.75 0 010 1.5h-.75A.75.75 0 0116.5 7.5z" /></svg>
       </div>
       <div id="wheelStatus" class="status-badge bg-green-500">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6 text-white"><path fill-rule="evenodd" d="M2.55 7.525a8.25 8.25 0 0110.152-4.144L12 4.582a6.75 6.75 0 00-8.237 3.328l-1.213-.385zM12 18a6 6 0 100-12 6 6 0 000 12zM11.25 9a.75.75 0 00-1.5 0v3.257a3 3 0 00-.776-.804l-1.724-1.725a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.06 0l2.25-2.25a.75.75 0 00-1.06-1.06l-1.725 1.724a3 3 0 00-.804.776V9z" clip-rule="evenodd" /><path d="M19.423 9.424a.75.75 0 00-.735-1.06l-2.434.646a.75.75 0 00-.372 1.455l2.062-.549.278.847a.75.75 0 001.442-.473L19.5 9.75l.138-.415.286.076a.75.75 0 00.347-1.458l-2.06-.549-.12.364a.75.75 0 00.223.882zM15.908 4.296a.75.75 0 00-.53-1.285l-1.21-.384a.75.75 0 00-.38.38l-.05.151.05.15a.75.75 0 00.38.38l1.21.385a.75.75 0 00.53-.38l.05-.15-.05-.15zM21.75 12a.75.75 0 00-.75-.75H19a.75.75 0 000 1.5h2A.75.75 0 0021.75 12zM17.25 20a.75.75 0 000 1.5h2a.75.75 0 000-1.5h-2zM12.75 22.5a.75.75 0 000 1.5h.75a.75.75 0 000-1.5h-.75z" /></svg>
@@ -99,7 +96,6 @@
 
     const eyesStatusIcon = document.getElementById('eyesStatus');
     const phoneStatusIcon = document.getElementById('phoneStatus');
-    const handsStatusIcon = document.getElementById('handsStatus');
     const wheelStatusIcon = document.getElementById('wheelStatus');
     
     // === Config
@@ -129,9 +125,9 @@
     let modelsReady = false, phoneReady = false;
 
     let pitchOffset=0, yawOffset=0;
-    let pitchStart=null, yawStart=null; // Added for head pose alerts
+    let pitchStart=null, yawStart=null;
     let pitchEMA=null, yawEMA=null, rollEMA=null;
-    let eyeStart=null, yawnStart=null, handsStart=null, lastPhoneDetections = [];
+    let eyeStart=null, yawnStart=null, lastPhoneDetections = [];
     
     let faceLastSeen = null;
 
@@ -215,7 +211,6 @@
       
       eyesStatusIcon.style.backgroundColor = '';
       phoneStatusIcon.style.backgroundColor = '';
-      handsStatusIcon.style.backgroundColor = '';
       wheelStatusIcon.style.backgroundColor = '';
       
       alertCard.classList.remove('success');
@@ -232,10 +227,6 @@
       if (v.phoneAlert) {
           phoneStatusIcon.style.backgroundColor = '#dc2626'; // Red
           alerts.push('ใช้โทรศัพท์');
-      }
-      if (v.handsAlert) {
-          handsStatusIcon.style.backgroundColor = '#dc2626'; // Red
-          alerts.push('มือทั้งสองข้างขึ้น');
       }
       if (v.wheelAlert) {
           wheelStatusIcon.style.backgroundColor = '#dc2626'; // Red
@@ -282,7 +273,7 @@
 
         const hands = collectHands(resH);
 
-        let eyeAlert=false,yawnAlert=false,handsAlert=false,phoneAlert=false,phone=false, wheelAlert=false;
+        let eyeAlert=false,yawnAlert=false,phoneAlert=false,phone=false, wheelAlert=false;
         let faceLost=false;
         let yawAlertText='', pitchAlertText='';
 
@@ -329,11 +320,7 @@
           if(!faceLastSeen) faceLastSeen = t;
           faceLost = (t - faceLastSeen > THRESH.FACE_LOST_ALERT_SEC);
         }
-
-        const handsCount = resH?.landmarks?.length || 0;
-        if(handsCount > 1){ if(handsStart==null) handsStart=now; else if((now-handsStart)/1000>THRESH.BOTH_HANDS_UP_SEC) handsAlert=true; }
-        else { handsStart=null; }
-
+        
         frameCount++;
         let phoneBoxes = lastPhoneDetections;
         if(phoneReady && (frameCount % THRESH.PHONE_CADENCE === 0)){
@@ -364,7 +351,7 @@
             }
         }
         
-        updateStatusIcons({ eyeAlert, yawnAlert, handsAlert, phoneAlert, wheelAlert, faceLost, yawAlertText, pitchAlertText });
+        updateStatusIcons({ eyeAlert, yawnAlert, phoneAlert, wheelAlert, faceLost, yawAlertText, pitchAlertText });
 
       }catch(e){ console.error('loop error',e); }
       finally{ isBusy=false; scheduleNext(loop); }
