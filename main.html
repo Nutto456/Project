@@ -88,7 +88,7 @@
 
     const eyesStatusIcon = document.getElementById('eyesStatus');
     const phoneStatusIcon = document.getElementById('phoneStatus');
-    const handsStatusIcon = document.getElementById('handsStatus');
+    // ลบ handsStatusIcon
     const wheelStatusIcon = document.getElementById('wheelStatus');
     
     const sndEyes  = document.getElementById('sndEyes');
@@ -99,10 +99,10 @@
     // === Config
     const THRESH = {
       EYE_CLOSED: 0.13,
-      YAWN: 0.50, // ปรับลดลงเพื่อให้ทำงานได้ดีขึ้นบนมือถือ
+      YAWN: 0.50,
       EYE_CLOSED_SEC: 1.0,
-      YAWN_SEC: 1.5, // ลดเวลาลงเพื่อให้แจ้งเตือนเร็วขึ้น
-      BOTH_HANDS_UP_SEC: 2, // ไม่ได้ใช้แล้ว
+      YAWN_SEC: 1.5,
+      BOTH_HANDS_UP_SEC: 2,
       PITCH_DOWN: 5,
       PITCH_UP: -10,
       YAW_LEFT: 8,
@@ -110,7 +110,7 @@
       HOLD_SEC: 1.0,
       PHONE_SCORE: 0.50,
       PHONE_CADENCE: 12,
-      WHEEL_OFF_ALERT_SEC: 2, // ลดเวลาลงเพื่อให้แจ้งเตือนเร็วขึ้น
+      WHEEL_OFF_ALERT_SEC: 2,
       FACE_LOST_ALERT_SEC: 2.0
     };
     
@@ -123,7 +123,6 @@
     let modelsReady = false, phoneReady = false;
 
     let pitchOffset=0, yawOffset=0;
-    let pitchStart=null, yawStart=null;
     let pitchEMA=null, yawEMA=null, rollEMA=null;
     let eyeStart=null, yawnStart=null, lastPhoneDetections = [];
     
@@ -138,7 +137,7 @@
     const rad2deg=(r)=>r*57.2957795;
     function playLoop(id, el){ el.loop=true; el.play().catch(()=>{}); }
     function stopLoop(id, el){ el.pause(); el.currentTime=0; }
-    function stopAll(){ stopLoop('EYES',sndEyes); stopLoop('YAWN',sndYawn); stopLoop('PHONE',sndPhone); stopLoop('WHEEL',sndHands); } // ลบ stopLoop 'HANDS'
+    function stopAll(){ stopLoop('EYES',sndEyes); stopLoop('YAWN',sndYawn); stopLoop('PHONE',sndPhone); stopLoop('WHEEL',sndHands); }
     
     // Face indices
     const EYE_L = [33,160,158,133,153,144];
@@ -212,7 +211,6 @@
       
       eyesStatusIcon.style.backgroundColor = '';
       phoneStatusIcon.style.backgroundColor = '';
-      handsStatusIcon.style.backgroundColor = '';
       wheelStatusIcon.style.backgroundColor = '';
       
       alertCard.classList.remove('success');
@@ -327,9 +325,8 @@
         const handsCount = resH?.landmarks?.length || 0;
         
         // --- Wheel Detection Logic (Updated)
-        handsStatusIcon.style.backgroundColor = ''; // Reset hands icon
+        // ลบ handsStatusIcon.style.backgroundColor
         if (handsCount > 0) {
-            handsStatusIcon.style.backgroundColor = '#22c55e'; // Green when hands detected
             wheelStatusIcon.style.backgroundColor = '#22c55e'; // Green
             wheelOffStart = null;
         } else {
@@ -402,7 +399,7 @@
 
     btnToggle.addEventListener('click', async ()=>{
       if(!isRunning){
-        [sndEyes,sndYawn,sndHands,sndPhone].forEach(a=>{ a.play().then(()=>{a.pause();a.currentTime=0;}).catch(()=>{}); });
+        [sndEyes,sndYawn,sndPhone].forEach(a=>{ a.play().then(()=>{a.pause();a.currentTime=0;}).catch(()=>{}); }); // ลบ sndHands
         try{
           if(!video.srcObject) await startCam();
           if(!modelsReady) await initModels();
