@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>Drowsiness Detection – 2 Hands + Wheel ONNX</title>
+  <link rel="icon" href="data:,">
+  <!-- Tailwind (CDN ok for dev; for prod use CLI/PostCSS) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- ONNX Runtime Web -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/ort.min.js"></script>
+  <style>
+    :root { --safe-inset-bottom: env(safe-area-inset-bottom); }
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; }
+    .video-wrap { position: relative; width: 100%; max-width: 560px; aspect-ratio: 3/4; }
+    @media (max-width: 768px){ .video-wrap{ max-width:100%; aspect-ratio: unset; height: calc(100dvh - 184px); } }
+    #video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+    #overlay { position: absolute; inset: 0; transform: scaleX(-1); }
+    .sheet { position: fixed; inset: auto 0 0 0; background: white; border-top-left-radius: 1.25rem; border-top-right-radius: 1.25rem; box-shadow: 0 -16px 40px rgba(2,6,23,.2); transform: translateY(100%); transition: transform .25s ease; }
+    .sheet.open { transform: translateY(0); }
+    .action-bar { position: sticky; bottom: 0; inset-inline: 0; padding-bottom: calc(var(--safe-inset-bottom) + .5rem); }
+    .badge { display:inline-block; padding:.15rem .5rem; border-radius:999px; font-size:.75rem; }
+    .subtle { font-size:.80rem; color:#334155 }
+    canvas { image-rendering: crisp-edges; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+  <div id="toast" class="hidden fixed top-3 right-3 z-50 px-4 py-2 rounded-lg text-white shadow"></div>
+
+  <main class="mx-auto max-w-5xl p-4">
+    <header class="mb-3 text-center">
+      <h1 class="text-2xl md:text-3xl font-bold">Drowsiness Detection</h1>
+      <p class="text-slate-600 text-sm">หน้าเดียว ใช้งานง่าย • <span class="font-semibold">Calibrate ก่อนเริ่ม</span></p>
+    </header>
+
+    <section class="video-wrap mx-auto rounded-xl overflow-hidden bg-gray-200">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </section>
+
+    <!-- Status -->
+    <section class="mt-3 grid grid-cols-2 gap-2 text-sm">
+      <div class="col-span-2 flex flex-wrap gap-2 items-center">
+        <span class="badge bg-blue-600 text-white" id="safeBadge">Head Pose: ON</span>
+        <span class="badge bg-slate-200 text-slate-700" id="dbgMode">matrix: auto</span>
+        <span class="badge bg-slate-200 text-slate-700" id="camBadge">cam: ?</span>
+        <span class="badge bg-slate-200 text-slate-700" id="modelBadge">models: ?</span>
+        <span class="badge bg-slate-200 text-slate-700" id="faceBadge">faces: 0</span>
+      </div>
+      
+      <div class="col-span-2">Wheel: <span id="wheelOut" class="font-semibold">-</span></div>
+      <p class="col-span-2 text-xs text-slate-500" id="scaleDbg">auto-scale: yaw×1.00 pitch×1.00</p>
+    </section>
+
+    <!-- Alerts -->
+    <section id="alertBox" class="hidden mt-3 p-3 rounded-xl bg-red-50 text-red-800 font-semibold"></section>
+
+    <!-- Bottom actions -->
+    <section class="action-bar bg-white/90 backdrop-blur rounded-xl border border-slate-200 p-3 mt-3 flex items-center gap-2">
+      <button id="btnCalib" class="px-4 py-2 rounded-xl text-white bg-indigo-600 hover:bg-indigo-700 font-semibold shadow flex-1">Calibrate</button>
+      <button id="btnToggle" class="px-4 py-2 rounded-xl text-white bg-blue-600 hover:bg-blue-700 font-semibold shadow flex-1" disabled>Start</button>
+      <button id="btnSettings" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 font-semibold shadow">ตั้งค่า</button>
+      <button id="btnFullscreen" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 font-semibold shadow">Fullscreen</button>
+    </section>
+  </main>
+
+  <!-- Settings Sheet -->
+  <div id="sheet" class="sheet p-4">
+    <div class="mx-auto max-w-xl">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-lg font-bold">ตั้งค่า</h2>
+        <button id="btnCloseSheet" class="px-3 py-1 rounded-lg bg-slate-100">ปิด</button>
+      </div>
+      <div class="space-y-4 text-sm">
+        <label class="flex items-center justify-between">
+          <span>Flip Yaw</span>
+          <input id="swFlipYaw" type="checkbox" class="scale-125" checked>
+        </label>
+        <label class="flex items-center justify-between">
+          <span>Flip Pitch</span>
+          <input id="swFlipPitch" type="checkbox" class="scale-125" checked>
+        </label>
+        <label class="flex items-center justify-between">
+          <span>Phone Detector</span>
+          <input id="swPhone" type="checkbox" class="scale-125" checked>
+        </label>
+        <label class="flex items-center justify-between">
+          <span>นับว่า "กำลังใช้โทรศัพท์" เมื่อมือทับกรอบโทรศัพท์</span>
+          <input id="swPhoneOverlap" type="checkbox" class="scale-125" checked>
+        </label>
+        <label class="flex items-center justify-between">
+          <span>Invert Wheel Label (สลับ On/Off)</span>
+          <input id="swInvertWheel" type="checkbox" class="scale-125">
+        </label>
+        <details>
+          <summary class="cursor-pointer select-none font-semibold">ขั้นสูง</summary>
+          <div class="mt-2 space-y-3">
+            <label class="flex items-center justify-between gap-3"><span>FPS</span>
+              <select id="fps" class="border rounded px-2 py-1">
+                <option>24</option>
+                <option selected>30</option>
+                <option>20</option>
+                <option>15</option>
+              </select>
+              <span id="cpuHint" class="text-xs text-slate-500"></span>
+            </label>
+            <label class="flex items-center justify-between gap-3"><span>Pose Gain</span>
+              <input id="poseGain" type="range" min="0.80" max="2.00" step="0.05" value="1.20" class="w-40">
+              <span id="poseGainLabel" class="tabular-nums">1.20×</span>
+            </label>
+            <label class="flex items-center justify-between gap-3"><span>Yaw Gain</span>
+              <input id="yawGain" type="range" min="0.50" max="4.00" step="0.10" value="2.00" class="w-40">
+              <span id="yawGainLabel" class="tabular-nums">2.00×</span>
+            </label>
+            <label class="flex items-center justify-between gap-3"><span>Pitch Gain</span>
+              <input id="pitchGain" type="range" min="0.50" max="4.00" step="0.10" value="1.40" class="w-40">
+              <span id="pitchGainLabel" class="tabular-nums">1.40×</span>
+            </label>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- sounds -->
+  <audio id="sndEyes"  src="./static/Sound/eyeclosed_alert.mp3" preload="auto"></audio>
+  <audio id="sndYawn"  src="./static/Sound/Yawn_alert.mp3" preload="auto"></audio>
+  <audio id="sndHands" src="./static/Sound/both_hand_alert.mp3" preload="auto"></audio>
+  <audio id="sndPhone" src="./static/Sound/phone_alert.mp3" preload="auto"></audio>
+
+  <script type="module">
+    import { FaceLandmarker, HandLandmarker, ObjectDetector, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+    // === Elements
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('overlay');
+    const ctx = canvas.getContext('2d');
+
+    const btnToggle = document.getElementById('btnToggle');
+    const btnCalib = document.getElementById('btnCalib');
+    const btnFullscreen = document.getElementById('btnFullscreen');
+    const btnSettings = document.getElementById('btnSettings');
+    const sheet = document.getElementById('sheet');
+    const btnCloseSheet = document.getElementById('btnCloseSheet');
+
+    const swFlipYaw = document.getElementById('swFlipYaw');
+    const swFlipPitch = document.getElementById('swFlipPitch');
+    const swPhone = document.getElementById('swPhone');
+    const swPhoneOverlap = document.getElementById('swPhoneOverlap');
+    const swInvertWheel = document.getElementById('swInvertWheel');
+
+    const fpsSel = document.getElementById('fps');
+    const poseGainEl = document.getElementById('poseGain');
+    const yawGainEl = document.getElementById('yawGain');
+    const pitchGainEl = document.getElementById('pitchGain');
+    const poseGainLabel = document.getElementById('poseGainLabel');
+    const yawGainLabel = document.getElementById('yawGainLabel');
+    const pitchGainLabel = document.getElementById('pitchGainLabel');
+
+    const dbgMode = document.getElementById('dbgMode');
+    const camBadge = document.getElementById('camBadge');
+    const modelBadge = document.getElementById('modelBadge');
+    const faceBadge = document.getElementById('faceBadge');
+    const scaleDbg = document.getElementById('scaleDbg');
+    const cpuHint = document.getElementById('cpuHint');
+    const toast = document.getElementById('toast');
+    const alertBox = document.getElementById('alertBox');
+
+    const pitchOut = document.getElementById('pitchOut');
+    const yawOut   = document.getElementById('yawOut');
+    const headLROut = document.getElementById('headLROut');
+    const headUDOut = document.getElementById('headUDOut');
+    const eyesOut  = document.getElementById('eyesOut');
+    const yawnOut  = document.getElementById('yawnOut');
+    const handsOut = document.getElementById('handsOut');
+    const phoneOut = document.getElementById('phoneOut');
+    const wheelOut = document.getElementById('wheelOut');
+    const blinkOut = document.getElementById('blinkOut');
+    const 
+
+    const sndEyes  = document.getElementById('sndEyes');
+    const sndYawn  = document.getElementById('sndYawn');
+    const sndHands = document.getElementById('sndHands');
+    const sndPhone = document.getElementById('sndPhone');
+
+    // === Config
+    const THRESH = {
+      EYE_CLOSED: 0.13,
+      YAWN: 0.60,
+      EYE_CLOSED_SEC: 1.0,
+      YAWN_SEC: 2.5,
+      BOTH_HANDS_UP_SEC: 2,
+      PITCH_DOWN: 15,
+      PITCH_UP: -18,
+      YAW_LEFT: 10,
+      YAW_RIGHT: -15,
+      HOLD_SEC: 1.0,
+      PHONE_SCORE: 0.50,
+      PHONE_CADENCE: 12
+    };
+    const BLINK = { MIN: 0.05, MAX: 0.40, WIN_SEC: 60 };
+    
+
+    // === State
+    let isRunning = false, isBusy = false, lastTick = 0;
+    let calibrated = false;
+    let flipYaw = true, flipPitch = true;
+
+    let faceLandmarker, handLandmarker, objDetector;
+    let modelsReady = false, phoneReady = false;
+
+    let pitchOffset=0, yawOffset=0;
+    let pitchEMA=null, yawEMA=null, rollEMA=null;
+    let eyeStart=null, yawnStart=null, handsStart=null, yawStart=null, pitchStart=null;
+    let playing = new Set();
+
+    let frameCount = 0; let lastPhoneDetections = [];
+
+    let sYawAuto = 1.0, sPitchAuto = 1.0;
+    let warmupFrames = 90; let earBase=null, marBase=null;
+
+    const winYaw=[], winPitch=[]; const WIN=5;
+
+    // Blink / PERCLOS / Face lost
+    let blinkTimes = [];
+    let eyeClosedNow = false, eyeClosedStart = 0;
+    let /* perclos removed */ [];
+    let lastSampleT = null;
+    let faceLastSeen = null;
+
+    // === Wheel ONNX
+    const WHEEL = {
+      session: null,
+      inputNames: [],
+      outputNames: [],
+      ready: false,
+      invert: false,
+      url: './static/models/hands_on_off.onnx'
+    };
+
+    // === Utils
+    const ema = (p,v,a=0.35)=>(!Number.isFinite(v)?p:(p==null?v:a*v+(1-a)*p));
+    const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+    const rad2deg=(r)=>r*57.2957795;
+    const showToast=(m,ok=true)=>{ toast.textContent=m; toast.className=`fixed top-3 right-3 z-50 px-4 py-2 rounded-lg text-white shadow ${ok?'bg-green-600':'bg-red-600'}`; toast.classList.remove('hidden'); setTimeout(()=>toast.classList.add('hidden'),2200); };
+    function playLoop(id, el){ if(!playing.has(id)){ el.loop=true; el.play().catch(()=>{}); playing.add(id);} }
+    function stopLoop(id, el){ if(playing.has(id)){ el.pause(); el.currentTime=0; playing.delete(id);} }
+    function stopAll(){ stopLoop('EYES',sndEyes); stopLoop('YAWN',sndYawn); stopLoop('HANDS',sndHands); stopLoop('PHONE',sndPhone); }
+
+    // Face indices
+    const EYE_L = [33,160,158,133,153,144];
+    const EYE_R = [263,387,385,362,380,373];
+    const MOUTH_TOP = 13, MOUTH_BOTTOM = 14, MOUTH_LEFT = 61, MOUTH_RIGHT = 291;
+
+    const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+    const ear=(lm,i)=>(dist(lm[i[1]],lm[i[5]])+dist(lm[i[2]],lm[i[4]]))/(2*dist(lm[i[0]],lm[i[3]]));
+    const marSimple=(lm)=>dist(lm[MOUTH_TOP], lm[MOUTH_BOTTOM]) / (dist(lm[MOUTH_LEFT], lm[MOUTH_RIGHT])+1e-6);
+
+    function eulerFromR(r){ const r00=r[0],r01=r[1],r02=r[2]; const r10=r[3],r11=r[4],r12=r[5]; const r20=r[6],r21=r[7],r22=r[8]; const sy=Math.hypot(r00,r10); let pitch,yaw,roll; if(sy>1e-6){ pitch=Math.atan2(-r20,sy); yaw=Math.atan2(r10,r00); roll=Math.atan2(r21,r22);} else { pitch=Math.atan2(-r20,sy); yaw=Math.atan2(-r01,r11); roll=0;} return {pitch:rad2deg(pitch),yaw:rad2deg(yaw),roll:rad2deg(roll)}; }
+    function poseFromMatrixAuto(m4){ if(!m4) return null; const a=Array.from(m4); if(a.length<16) return null; const Rr=[a[0],a[1],a[2], a[4],a[5],a[6], a[8],a[9],a[10]]; const Rc=[a[0],a[4],a[8], a[1],a[5],a[9], a[2],a[6],a[10]]; const er=eulerFromR(Rr), ec=eulerFromR(Rc); const mr=Math.abs(er.pitch)+Math.abs(er.yaw)+Math.abs(er.roll); const mc=Math.abs(ec.pitch)+Math.abs(ec.yaw)+Math.abs(ec.roll); const useCol=mc>mr*1.1; dbgMode.textContent=`matrix: ${useCol?'col-major':'row-major'}`; const e=useCol?ec:er; return { pitch:clamp(e.pitch,-60,60), yaw:clamp(e.yaw,-90,90), roll:clamp(e.roll,-60,60) }; }
+    function poseSimple(lm){ const Leye=lm[33],Reye=lm[263],Nose=lm[1]; if(!Leye||!Reye||!Nose) return null; const midX=(Leye.x+Reye.x)/2, midY=(Leye.y+Reye.y)/2; const yaw=(Nose.x-midX)*260; const pitch=(midY-Nose.y)*360; return {pitch:clamp(pitch,-60,60),yaw:clamp(yaw,-90,90),roll:0}; }
+    function resizeCanvas(){ const w=video.videoWidth||640, h=video.videoHeight||480; canvas.width=w; canvas.height=h; }
+    window.addEventListener('resize',()=>{ if(video?.videoWidth) resizeCanvas(); });
+
+    // Wheel features
+    function handFeaturesXY(hand){
+      if(!hand?.length) return new Float32Array(42);
+      let minX=1,minY=1,maxX=0,maxY=0;
+      for(const p of hand){ if(p.x<minX)minX=p.x; if(p.y<minY)minY=p.y; if(p.x>maxX)maxX=p.x; if(p.y>maxY)maxY=p.y; }
+      const scaleX = (maxX-minX)||1e-6, scaleY=(maxY-minY)||1e-6;
+      const out = new Float32Array(42);
+      for(let i=0;i<21;i++){
+        const x = (hand[i].x - minX)/scaleX;
+        const y = (hand[i].y - minY)/scaleY;
+        out[i*2]=x; out[i*2+1]=y;
+      }
+      return out;
+    }
+    function bothHandsFeatures(hands){
+      const left = hands.find(h=>h.handedness==='Left')?.lm || hands[0]?.lm || [];
+      const right= hands.find(h=>h.handedness==='Right')?.lm || hands[1]?.lm || [];
+      const fL = handFeaturesXY(left);
+      const fR = handFeaturesXY(right);
+      const out = new Float32Array(84);
+      out.set(fL,0); out.set(fR,42);
+      return out;
+    }
+
+    // Draw hands for debug
+    function drawHands(hands){
+      const w=canvas.width, h=canvas.height;
+      ctx.save();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(16,185,129,0.9)';
+      ctx.fillStyle = 'rgba(16,185,129,0.25)';
+      for(const hand of hands){
+        for(const p of hand.lm){
+          ctx.beginPath();
+          ctx.arc(w - p.x*w, p.y*h, 3, 0, Math.PI*2);
+          ctx.fill();
+        }
+        const xs = hand.lm.map(p=>w - p.x*w), ys = hand.lm.map(p=>p.y*h);
+        const minX=Math.min(...xs), maxX=Math.max(...xs);
+        const minY=Math.min(...ys), maxY=Math.max(...ys);
+        ctx.strokeRect(minX,minY,maxX-minX,maxY-minY);
+      }
+      ctx.restore();
+    }
+
+    // Collect hands tolerant
+    function collectHands(resH){
+      const out=[];
+      const lms = resH?.landmarks||[];
+      const hd  = resH?.handednesses||[];
+      for(let i=0;i<lms.length;i++){
+        const lm = lms[i];
+        const handed = hd?.[i]?.[0]?.categoryName || null;
+        out.push({ lm, handedness: handed });
+      }
+      return out;
+    }
+
+    
+        // Wheel ONNX (+fallback) simplified (On/Off only)
+        let wheelOn = null;
+        if(WHEEL.ready){
+          const pred = await wheelPredict(hands);
+          if(pred.ok){ wheelOn = pred.on; }
+        }
+        if(wheelOn===null){
+          const fb = heuristicWheel(hands);
+          if(fb.on!==null){ wheelOn = fb.on; }
+        }
+        const wheelStatus = wheelOn ? 'On Wheel' : 'Off Wheel';
+        updateUI({ pitch,yaw,headLR,headUD,eyeStatus,yawnStatus,handStatus,phone,
+          eyeAlert,yawnAlert,handsAlert,phoneAlert,yawAlertText,pitchAlertText,
+          wheelStatus, wheelAlert:false, blinkText, faceLost });
+updateUI(v){
+      const fmt=(x)=>Number.isFinite(x)?x.toFixed(1):'-';
+      pitchOut.textContent=fmt(v.pitch);
+      yawOut.textContent=fmt(v.yaw);
+      headLROut.textContent=v.headLR??'-';
+      headUDOut.textContent=v.headUD??'-';
+      eyesOut.textContent=v.eyeStatus??'-';
+      yawnOut.textContent=v.yawnStatus??'-';
+      handsOut.textContent=v.handStatus??'-';
+      phoneOut.textContent=v.phone? 'Yes':'No';
+      wheelOut.textContent = v.wheelStatus ?? '-';
+      blinkOut.textContent = v.blinkText ?? '-';
+      
+
+      const alerts=[];
+      if(v.eyeAlert) alerts.push('Eyes Closed!');
+      if(v.yawnAlert) alerts.push('Yawning!');
+      if(v.handsAlert) alerts.push('Both Hands Up!');
+      if(v.phoneAlert) alerts.push('Using Phone!');
+      if(v.wheelAlert) alerts.push('Hands Off Wheel!');
+      if(v.yawAlertText) alerts.push(v.yawAlertText);
+      if(v.pitchAlertText) alerts.push(v.pitchAlertText);
+      if(v.faceLost) alerts.push('Face Lost!');
+
+      if(alerts.length){
+        alertBox.classList.remove('hidden');
+        alertBox.innerHTML=alerts.map(a=>`<p>${a}</p>`).join('');
+      } else {
+        alertBox.classList.add('hidden');
+        alertBox.innerHTML='';
+      }
+      alerts.includes('Eyes Closed!')?playLoop('EYES',sndEyes):stopLoop('EYES',sndEyes);
+      alerts.includes('Yawning!')?playLoop('YAWN',sndYawn):stopLoop('YAWN',sndYawn);
+      alerts.includes('Both Hands Up!')?playLoop('HANDS',sndHands):stopLoop('HANDS',sndHands);
+      alerts.includes('Using Phone!')?playLoop('PHONE',sndPhone):stopLoop('PHONE',sndPhone);
+    }
+
+    const rVFC = video.requestVideoFrameCallback?.bind(video);
+    function scheduleNext(loopFn){ if(rVFC) rVFC(()=>loopFn()); else requestAnimationFrame(loopFn); }
+    const getFPS=()=>Number(fpsSel?.value)||30;
+    const medianPush=(win,v)=>{ if(!Number.isFinite(v)) return v; win.push(v); if(win.length>WIN) win.shift(); const a=[...win].sort((x,y)=>x-y); const n=a.length; return n?(n%2?a[(n-1)/2]:(a[n/2-1]+a[n/2])/2):v; };
+    function adaptCpu(){ const fps=getFPS(); const cadence=Math.max(8, Math.round((fps/30)*THRESH.PHONE_CADENCE)); THRESH.PHONE_CADENCE=cadence; cpuHint && (cpuHint.textContent=`• phone every ${cadence}f`); }
+
+    // Main loop
+    async function loop(){
+      if(!isRunning) return;
+      const now=performance.now();
+      const budget=1000/getFPS();
+      if(now-lastTick<budget){ return scheduleNext(loop);}
+      lastTick=now;
+      if(isBusy){ return scheduleNext(loop);}
+      isBusy=true;
+      adaptCpu();
+
+      try{
+        const resF = faceLandmarker?.detectForVideo?.(video, now);
+        const resH = handLandmarker?.detectForVideo?.(video, now);
+        faceBadge.textContent = `faces: ${resF?.faceLandmarks?.length||0}`;
+        const face = resF?.faceLandmarks?.[0] || null;
+
+        const hands = collectHands(resH);
+
+        let pitch=null,yaw=null; let eyeStatus='-', yawnStatus='-', handStatus='No Hands';
+        let eyeAlert=false,yawnAlert=false,handsAlert=false,phoneAlert=false,phone=false, wheelAlert=false;
+        let headLR='Center', headUD='Center', yawAlertText='', pitchAlertText='', wheelStatus='-';
+        let blinkText='-', /* perclos removed */'-'; let faceLost=false;
+
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        if(face){
+          const m4 = resF?.facialTransformationMatrixes?.[0];
+          let pose = poseFromMatrixAuto(m4) || poseSimple(face);
+          if(pose){
+            const rawPitch=pose.pitch, rawYaw=pose.yaw;
+            const heur = poseSimple(face);
+            if(heur){ const ry=clamp(Math.abs(heur.yaw)/(Math.abs(rawYaw)+1e-3),0.5,6.0); const rp=clamp(Math.abs(heur.pitch)/(Math.abs(rawPitch)+1e-3),0.5,6.0); sYawAuto=ema(sYawAuto,ry,0.08); sPitchAuto=ema(sPitchAuto,rp,0.08); }
+            pitchEMA=ema(pitchEMA,rawPitch); yawEMA=ema(yawEMA,rawYaw);
+            const pVal=Number.isFinite(pitchEMA)?pitchEMA:0; const yVal=Number.isFinite(yawEMA)?yawEMA:0;
+            const yScale=(Number(poseGainEl?.value)||1.2)*(Number(yawGainEl?.value)||2.0)*sYawAuto;
+            const pScale=(Number(poseGainEl?.value)||1.2)*(Number(pitchGainEl?.value)||1.4)*sPitchAuto;
+            pitch = clamp((pVal - pitchOffset) * pScale, -60, 60);
+            yaw   = clamp((yVal - yawOffset) * yScale,  -90, 90);
+            if(flipYaw) yaw=-yaw; if(flipPitch) pitch=-pitch;
+            pitch = medianPush(winPitch,pitch); yaw = medianPush(winYaw,yaw);
+            scaleDbg.textContent = `auto-scale: yaw×${(sYawAuto||1).toFixed(2)} pitch×${(sPitchAuto||1).toFixed(2)}`;
+          }
+
+          // Adaptive baselines for eye/yawn
+          const EAR = ear(face, EYE_L)*0.5 + ear(face, EYE_R)*0.5;
+          const MAR = marSimple(face);
+          if(warmupFrames>0){ earBase=ema(earBase,EAR,0.05); marBase=ema(marBase,MAR,0.05); warmupFrames--; }
+          const eyeCut = earBase? Math.max(0.08, earBase*0.65) : THRESH.EYE_CLOSED;
+          const yawnCut = marBase? Math.max(0.45, marBase*1.35) : THRESH.YAWN;
+          if(EAR < eyeCut){ if(eyeStart==null) eyeStart=now; else if((now-eyeStart)/1000>THRESH.EYE_CLOSED_SEC) eyeAlert=true; eyeStatus='Eyes Closed'; }
+          else { eyeStatus='Eyes Open'; eyeStart=null; }
+          if(MAR > yawnCut){ if(yawnStart==null) yawnStart=now; else if((now-yawnStart)/1000>THRESH.YAWN_SEC) yawnAlert=true; yawnStatus='Yawning'; }
+          else { yawnStatus='No Yawn'; yawnStart=null; }
+
+          if(Number.isFinite(yaw)){
+            if(yaw > Math.abs(THRESH.YAW_LEFT)) headLR='Turn Right'; else if(yaw < THRESH.YAW_RIGHT) headLR='Turn Left'; else headLR='Center';
+            if(headLR!=='Center'){ if(yawStart==null) yawStart=now; else if((now-yawStart)/1000>THRESH.HOLD_SEC) yawAlertText=headLR; } else yawStart=null;
+          }
+          if(Number.isFinite(pitch)){
+            if(pitch > THRESH.PITCH_DOWN) headUD='Head Down'; else if(pitch < THRESH.PITCH_UP) headUD='Head Up'; else headUD='Center';
+            if(headUD!=='Center'){ if(pitchStart==null) pitchStart=now; else if((now-pitchStart)/1000>THRESH.HOLD_SEC) pitchAlertText=headUD; } else pitchStart=null;
+          }
+
+          // Blink & PERCLOS & Face lost
+          const t = now/1000;
+          if (EAR < eyeCut) {
+            if (!eyeClosedNow) { eyeClosedNow = true; eyeClosedStart = t; }
+          } else {
+            if (eyeClosedNow) {
+              const dur = t - eyeClosedStart;
+              if (dur >= BLINK.MIN && dur <= BLINK.MAX) blinkTimes.push(t);
+              eyeClosedNow = false;
+            }
+          }
+          blinkTimes = blinkTimes.filter(x => t - x <= BLINK.WIN_SEC);
+          const blinksPerMin = (blinkTimes.length / BLINK.WIN_SEC) * 60;
+
+          if (lastSampleT == null) lastSampleT = t;
+          const dt = Math.max(0, t - lastSampleT);
+          lastSampleT = t;
+          perclosSamples.push({ dt, closed: EAR < eyeCut });
+          let total = 0, closedSum = 0;
+          for (let i = /* perclos removed */ 0; i--) {
+            total += perclosSamples[i].dt;
+            if (/* perclos removed */ perclosSamples[i].dt;
+            if (total > PERCLOS.WIN_SEC) {
+              const over = total - PERCLOS.WIN_SEC;
+              /* perclos removed */ over;
+              if (/* perclos removed */ 0) perclosSamples.splice(i,1);
+              break;
+            }
+          }
+          let acc=0; /* perclos removed */ /* perclos removed */> (acc+=s.dt) <= PERCLOS.WIN_SEC);
+          const /* perclos removed */ total > 0 ? (closedSum / Math.min(total, PERCLOS.WIN_SEC)) : 0;
+
+          faceLastSeen = t;
+          faceLost = false;
+
+          blinkText = `${blinkTimes.length}`;
+          /* perclos removed */ `${(perclos*100).toFixed(0)}%`;
+          if (perclos > PERCLOS.ALERT) { /* keep for alert box */ }
+
+        } else {
+          yawStart=null; pitchStart=null; dbgMode.textContent='matrix: waiting (no face)';
+          const t = now/1000;
+          if(!faceLastSeen) faceLastSeen = t;
+          faceLost = (t - faceLastSeen > 2.0);
+        }
+
+        // hands info
+        const handsCount = resH?.landmarks?.length || 0;
+        handStatus = `${handsCount} Hand(s)`;
+
+        // Phone detection
+        frameCount++;
+        const phoneEnabled = !!(swPhone && swPhone.checked);
+        const requireHandOverlap = !!(swPhoneOverlap && swPhoneOverlap.checked);
+        let phoneBoxes = lastPhoneDetections;
+        if(phoneEnabled && phoneReady && (frameCount % THRESH.PHONE_CADENCE === 0)){
+          const r = objDetector.detectForVideo(video, now);
+          const boxes=[];
+          for(const det of (r?.detections || [])){
+            const cat = det.categories?.[0]; if(!cat) continue;
+            const name=(cat.categoryName||'').toLowerCase(); if(name!=="cell phone") continue;
+            const bb=det.boundingBox; boxes.push({xMin:bb.originX,yMin:bb.originY,xMax:bb.originX+bb.width,yMax:bb.originY+bb.height,score:cat.score||0});
+          }
+          phoneBoxes = boxes; lastPhoneDetections = boxes;
+        }
+        if(phoneBoxes?.length){
+          ctx.save(); ctx.lineWidth=2; ctx.strokeStyle='rgba(234,179,8,0.95)'; ctx.fillStyle='rgba(234,179,8,0.15)';
+          for(const b of phoneBoxes){
+            const w=canvas.width; const bw=b.xMax-b.xMin; const bh=b.yMax-b.yMin; const mx=w-(b.xMin+bw);
+            ctx.fillRect(mx,b.yMin,bw,bh); ctx.strokeRect(mx,b.yMin,bw,bh);
+          }
+          ctx.restore();
+        }
+        if(phoneEnabled && phoneBoxes?.length){
+          if(requireHandOverlap){
+            const w=canvas.width,h=canvas.height; let overlap=false;
+            outer: for(const hnd of hands){
+              const pts=hnd.lm.map(p=>({x:p.x*w,y:p.y*h}));
+              for(const p of pts){
+                for(const b of phoneBoxes){ if(p.x>=b.xMin && p.x<=b.xMax && p.y>=b.yMin && p.y<=b.yMax){ overlap=true; break outer; } }
+              }
+            }
+            phone = overlap;
+          } else { phone = true; }
+        } else { phone=false; }
+        phoneAlert = phone;
+
+        // Draw hands debug (optional)
+        drawHands(hands);
+
+        
+        // Wheel ONNX (+fallback) simplified (On/Off only)
+        let wheelOn = null;
+        if(WHEEL.ready){
+          const pred = await wheelPredict(hands);
+          if(pred.ok){ wheelOn = pred.on; }
+        }
+        if(wheelOn===null){
+          const fb = heuristicWheel(hands);
+          if(fb.on!==null){ wheelOn = fb.on; }
+        }
+        const wheelStatus = wheelOn ? 'On Wheel' : 'Off Wheel';
+        updateUI({ pitch,yaw,headLR,headUD,eyeStatus,yawnStatus,handStatus,phone,
+          eyeAlert,yawnAlert,handsAlert,phoneAlert,yawAlertText,pitchAlertText,
+          wheelStatus, wheelAlert:false, blinkText, faceLost });
+updateUI({ pitch,yaw,headLR,headUD,eyeStatus,yawnStatus,handStatus,phone, eyeAlert,yawnAlert,handsAlert,phoneAlert, yawAlertText,pitchAlertText, wheelStatus, wheelAlert, blinkText, faceLost });
+
+      }catch(e){ console.error('loop error',e); }
+      finally{ isBusy=false; scheduleNext(loop); }
+    }
+
+    // Events & onboarding
+    function syncRange(el,label){ const v=Number(el?.value); if(!label) return; label.textContent = `${(Number.isFinite(v)? v:1).toFixed(2)}×`; }
+    ;[poseGainEl,yawGainEl,pitchGainEl].forEach((el,i)=>{ if(!el) return; const labels=[poseGainLabel,yawGainLabel,pitchGainLabel]; el.addEventListener('input',()=>syncRange(el,labels[i])); syncRange(el,labels[i]); });
+
+    swFlipYaw.checked = true; swFlipPitch.checked = true; swPhone.checked = true; swPhoneOverlap.checked = true;
+    swInvertWheel.addEventListener('change', ()=>{ WHEEL.invert = swInvertWheel.checked; showToast(`Invert Wheel: ${WHEEL.invert?'ON':'OFF'}`); });
+
+    btnSettings.addEventListener('click', ()=> sheet.classList.add('open'));
+    btnCloseSheet.addEventListener('click', ()=> sheet.classList.remove('open'));
+
+    btnCalib.addEventListener('click', async ()=>{
+      btnCalib.disabled = true;
+      try{
+        if(!video.srcObject){ try{ await startCam(); }catch{} }
+        if(!modelsReady){ try{ await initModels(); }catch{} }
+        if(!WHEEL.ready){ try{ await initWheelONNX(); }catch{} }
+
+        const deadline = performance.now() + 2000;
+        let got = false, lastPose = null;
+        while(performance.now() < deadline){
+          const now = performance.now();
+          const resF = faceLandmarker?.detectForVideo?.(video, now);
+          const face = resF?.faceLandmarks?.[0] || null;
+          if(face){
+            const m4 = resF?.facialTransformationMatrixes?.[0];
+            const pose = poseFromMatrixAuto(m4) || poseSimple(face);
+            if(pose && Number.isFinite(pose.pitch) && Number.isFinite(pose.yaw)){ lastPose = pose; got = true; break; }
+          }
+          await new Promise(r => requestAnimationFrame(()=>r()));
+        }
+
+        if(!got){ showToast('ยังไม่พบหน้าในกรอบ • ขยับให้อยู่กลางภาพ/เพิ่มแสง', false); return; }
+        const usePitch = Number.isFinite(pitchEMA) ? pitchEMA : lastPose.pitch;
+        const useYaw   = Number.isFinite(yawEMA)   ? yawEMA   : lastPose.yaw;
+        pitchOffset = usePitch; yawOffset = useYaw; calibrated = true; btnToggle.disabled = false;
+        canvas.style.outline = '3px solid #10b981'; setTimeout(()=>{ canvas.style.outline = 'none'; }, 520);
+        showToast('Calibrated! พร้อมเริ่มใช้งาน');
+      } finally { btnCalib.disabled = false; }
+    });
+
+    btnToggle.addEventListener('click', async ()=>{
+      if(!isRunning){
+        [sndEyes,sndYawn,sndHands,sndPhone].forEach(a=>{ a.play().then(()=>{a.pause();a.currentTime=0;}).catch(()=>{}); });
+        try{
+          if(!video.srcObject) await startCam();
+          if(!modelsReady) await initModels();
+          if(!WHEEL.ready) await initWheelONNX();
+          if(!calibrated){ showToast('กด Calibrate ก่อนเริ่ม', false); return; }
+          isRunning = true; btnToggle.textContent='Stop';
+          scheduleNext(loop);
+        }catch(err){ console.error(err); showToast('เริ่มไม่สำเร็จ: อนุญาตกล้อง/อินเทอร์เน็ต', false); }
+      } else {
+        isRunning = false; btnToggle.textContent='Start';
+        stopAll();
+        const s = video.srcObject; if(s){ s.getTracks().forEach(t=>t.stop()); video.srcObject=null; }
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        showToast('หยุดการตรวจจับ');
+      }
+    });
+
+    btnFullscreen.addEventListener('click', ()=>{
+      document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(()=>{});
+    });
+
+    swFlipYaw.addEventListener('change', ()=>{ flipYaw = swFlipYaw.checked; showToast(`Flip Yaw: ${flipYaw?'ON':'OFF'}`); });
+    swFlipPitch.addEventListener('change', ()=>{ flipPitch = swFlipPitch.checked; showToast(`Flip Pitch: ${flipPitch?'ON':'OFF'}`); });
+
+    // Auto start camera + preload models
+    (async ()=>{
+      try{
+        await startCam();
+        await initModels();
+        await initWheelONNX();
+        showToast('ยืนตรง มองกล้อง แล้วกด Calibrate');
+      }catch{}
+    })();
+  </script>
+</body>
+</html>
