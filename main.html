@@ -17,7 +17,17 @@
     .status-badge { display: flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 999px; }
     .indicator-group { position: fixed; top: 1rem; right: 1rem; z-index: 50; display: flex; gap: 0.5rem; padding: 0.5rem; background-color: rgba(0, 0, 0, 0.5); backdrop-filter: blur(8px); border-radius: 0.5rem; }
     .indicator-group svg { color: white; }
-    .alert-popup { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; padding: 1rem; background-color: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); }
+    .alert-popup { 
+      position: fixed; 
+      inset: 0; 
+      z-index: 50; 
+      display: none; 
+      align-items: center; 
+      justify-content: center; 
+      padding: 1rem; 
+      background-color: rgba(0, 0, 0, 0.7); 
+      backdrop-filter: blur(4px);
+    }
     .alert-popup.show { display: flex; }
     .alert-popup .card { padding: 1.5rem; border-radius: 1.5rem; text-align: center; box-shadow: 0 10px 15px rgba(0,0,0,0.1); }
     .alert-popup .card.success { background-color: #10b981; }
@@ -94,7 +104,7 @@
     // === Config
     const THRESH = {
       EYE_CLOSED: 0.13,
-      YAWN: 0.25, // Adjusted for better responsiveness
+      YAWN: 0.50,
       EYE_CLOSED_SEC: 1.0,
       YAWN_SEC: 1.5,
       PITCH_DOWN: 5,
