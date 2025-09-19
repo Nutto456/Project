@@ -195,14 +195,16 @@
       PHONE_CADENCE: 12
     };
     const BLINK = { MIN: 0.05, MAX: 0.40, WIN_SEC: 60 };
+    const WHEEL_OFF_ALERT_SEC = 3;
 
     // === State
     let isRunning = false, isBusy = false, lastTick = 0;
     let calibrated = false;
     let flipYaw = true, flipPitch = true;
     let isSettingWheel = false;
-    let wheelBox = { x: 200, y: 300, width: 250, height: 250 }; // Default box
+    let wheelBox = { x: 100, y: 200, width: 400, height: 400 }; 
     let wheelStartPos = null;
+    let wheelOffStart = null; 
 
     let faceLandmarker, handLandmarker, objDetector;
     let modelsReady = false, phoneReady = false;
@@ -270,6 +272,12 @@
              box1.x + box1.width > box2.x &&
              box1.y < box2.y + box2.height &&
              box1.y + box1.height > box2.y;
+    }
+
+    // Helper function to check if a point is in a box
+    function isPointInBox(point, box) {
+      return point.x > box.x && point.x < box.x + box.width &&
+             point.y > box.y && point.y < box.y + box.height;
     }
 
     // Init MediaPipe
@@ -482,34 +490,63 @@
         } else { phone=false; }
         phoneAlert = phone;
 
-        // --- Wheel Detection ---
+        // --- Wheel Detection (Improved) ---
         let handsOnWheel = false;
 
+        const wheelBox = { 
+            x: 100,
+            y: 200,
+            width: 400,
+            height: 400
+        };
+        
+        const detectionMargin = 50;
+
         if (hands.length > 0) {
-          for (const hand of hands) {
-            // Get bounding box of the hand landmarks
-            const handXMin = Math.min(...hand.lm.map(p => (1 - p.x) * canvas.width));
-            const handYMin = Math.min(...hand.lm.map(p => p.y * canvas.height));
-            const handXMax = Math.max(...hand.lm.map(p => (1 - p.x) * canvas.width));
-            const handYMax = Math.max(...hand.lm.map(p => p.y * canvas.height));
-            
-            const handBox = {
-              x: handXMin,
-              y: handYMin,
-              width: handXMax - handXMin,
-              height: handYMax - handYMin
-            };
-            
-            // Check for overlap
-            if (isOverlapping(handBox, wheelBox)) {
-              handsOnWheel = true;
-              break; 
+            for (const hand of hands) {
+                const handXMin = Math.min(...hand.lm.map(p => (1 - p.x) * canvas.width));
+                const handYMin = Math.min(...hand.lm.map(p => p.y * canvas.height));
+                const handXMax = Math.max(...hand.lm.map(p => (1 - p.x) * canvas.width));
+                const handYMax = Math.max(...hand.lm.map(p => p.y * canvas.height));
+                
+                const handBox = {
+                    x: handXMin,
+                    y: handYMin,
+                    width: handXMax - handXMin,
+                    height: handYMax - handYMin
+                };
+                
+                const handCenterX = handBox.x + handBox.width / 2;
+                const handCenterY = handBox.y + handBox.height / 2;
+
+                if (
+                    handCenterX >= wheelBox.x - detectionMargin &&
+                    handCenterX <= wheelBox.x + wheelBox.width + detectionMargin &&
+                    handCenterY >= wheelBox.y - detectionMargin &&
+                    handCenterY <= wheelBox.y + wheelBox.height + detectionMargin
+                ) {
+                    handsOnWheel = true;
+                    break;
+                }
             }
-          }
         }
         
-        wheelStatus = handsOnWheel ? 'On Wheel' : 'Off Wheel';
-        wheelAlert = !handsOnWheel;
+        if (handsOnWheel) {
+            wheelStatus = 'On Wheel';
+            wheelOffStart = null;
+            wheelAlert = false;
+        } else {
+            if (wheelOffStart === null) {
+                wheelOffStart = now;
+            }
+            if ((now - wheelOffStart) / 1000 > WHEEL_OFF_ALERT_SEC) {
+                wheelStatus = 'Off Wheel';
+                wheelAlert = true;
+            } else {
+                wheelStatus = 'On Wheel (hands moving)';
+                wheelAlert = false;
+            }
+        }
         // --- End of Wheel Detection ---
         
         updateUI({ pitch,yaw,headLR,headUD,eyeStatus,yawnStatus,handStatus,phone, eyeAlert,yawnAlert,handsAlert,phoneAlert, yawAlertText,pitchAlertText, wheelStatus, wheelAlert, blinkText });
@@ -526,76 +563,6 @@
 
     btnSettings.addEventListener('click', ()=> sheet.classList.add('open'));
     btnCloseSheet.addEventListener('click', ()=> sheet.classList.remove('open'));
-
-    btnSetWheel.addEventListener('click', () => {
-        isSettingWheel = !isSettingWheel;
-        btnCalib.disabled = isSettingWheel;
-        if (isSettingWheel) {
-            showToast('คลิกและลากเมาส์เพื่อกำหนดกรอบพวงมาลัย');
-            btnSetWheel.textContent = 'กำลังตั้งค่า...';
-        } else {
-            showToast('ตั้งค่าพวงมาลัยเรียบร้อยแล้ว');
-            btnSetWheel.textContent = 'ตั้งค่าพวงมาลัย';
-        }
-    });
-
-    // Handle interactive wheel setting
-    let isDrawing = false;
-    let startX = 0;
-    let startY = 0;
-
-    canvas.addEventListener('mousedown', (e) => {
-      if (!isSettingWheel) return;
-      isDrawing = true;
-      const rect = canvas.getBoundingClientRect();
-      startX = (e.clientX - rect.left) / rect.width * canvas.width;
-      startY = (e.clientY - rect.top) / rect.height * canvas.height;
-    });
-
-    canvas.addEventListener('mousemove', (e) => {
-      if (!isDrawing || !isSettingWheel) return;
-      const rect = canvas.getBoundingClientRect();
-      const currentX = (e.clientX - rect.left) / rect.width * canvas.width;
-      const currentY = (e.clientY - rect.top) / rect.height * canvas.height;
-      
-      ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear old box
-      
-      ctx.save();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(255,165,0,0.9)';
-      const x = Math.min(startX, currentX);
-      const y = Math.min(startY, currentY);
-      const width = Math.abs(currentX - startX);
-      const height = Math.abs(currentY - startY);
-      ctx.strokeRect(x, y, width, height);
-      ctx.restore();
-    });
-
-    canvas.addEventListener('mouseup', (e) => {
-      if (!isDrawing || !isSettingWheel) return;
-      isDrawing = false;
-      
-      const rect = canvas.getBoundingClientRect();
-      const endX = (e.clientX - rect.left) / rect.width * canvas.width;
-      const endY = (e.clientY - rect.top) / rect.height * canvas.height;
-
-      const x1 = Math.min(startX, endX);
-      const y1 = Math.min(startY, endY);
-      const x2 = Math.max(startX, endX);
-      const y2 = Math.max(startY, endY);
-      
-      wheelBox = {
-        x: x1,
-        y: y1,
-        width: x2 - x1,
-        height: y2 - y1
-      };
-      
-      isSettingWheel = false;
-      showToast('ตั้งค่าพวงมาลัยเรียบร้อยแล้ว');
-      btnSetWheel.textContent = 'ตั้งค่าพวงมาลัย';
-      btnCalib.disabled = false;
-    });
 
     btnCalib.addEventListener('click', async ()=>{
       btnCalib.disabled = true;
