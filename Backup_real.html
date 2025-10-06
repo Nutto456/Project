@@ -13,7 +13,8 @@
     @media (max-width: 768px){ .video-wrap{ max-width:100%; aspect-ratio: unset; height: calc(100dvh - 120px); } }
     #video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
     #overlay { position: absolute; inset: 0; transform: scaleX(-1); }
-    .action-bar { position: fixed; inset: auto 1rem 1rem 1rem; padding-bottom: calc(var(--safe-area-inset-bottom) + 0.5rem); }
+    /* เพิ่ม z-index ให้ action-bar เพื่อให้ปุ่มอยู่ด้านบนสุด */
+    .action-bar { position: fixed; inset: auto 1rem 1rem 1rem; padding-bottom: calc(var(--safe-area-inset-bottom) + 0.5rem); z-index: 60; }
     .status-badge { display: flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 999px; }
     .indicator-group { position: fixed; top: 1rem; right: 1rem; z-index: 50; display: flex; gap: 0.5rem; padding: 0.5rem; background-color: rgba(0, 0, 0, 0.5); backdrop-filter: blur(8px); border-radius: 0.5rem; }
     .indicator-group svg { color: white; }
@@ -217,7 +218,6 @@
         alertCard.classList.remove('success');
         alertCard.classList.add('error');
         alertBox.classList.add('show');
-        // Re-enable Calibrate button on error
         btnCalib.disabled = false;
         throw err;
       }
@@ -364,8 +364,53 @@
         }
 
         const handsCount = resH?.landmarks?.length || 0;
-        if(handsCount > 1){ if(handsStart==null) handsStart=now; else if((now-handsStart)/1000>THRESH.BOTH_HANDS_UP_SEC) handsAlert=true; }
-        else { handsStart=null; }
+        
+        // ตรวจสอบว่ามีมือสองข้างและอยู่ในตำแหน่งที่อาจเป็น "ยกมือขึ้น"
+        let bothHandsUp = false;
+        if (handsCount >= 2) {
+          // ตรวจสอบตำแหน่ง Y ของมือทั้งสองข้างเทียบกับจมูก
+          const noseY = face ? face[1].y : 0;
+          let leftHandY = 1, rightHandY = 1;
+
+          // ตรวจสอบมือซ้าย
+          const leftHand = hands.find(h => h.handedness === 'Left');
+          if (leftHand) {
+            // ใช้ landmark ที่ 9 (ข้อนิ้วกลาง) เป็นตัวแทน
+            leftHandY = leftHand.lm[9].y;
+          }
+
+          // ตรวจสอบมือขวา
+          const rightHand = hands.find(h => h.handedness === 'Right');
+          if (rightHand) {
+            // ใช้ landmark ที่ 9 (ข้อนิ้วกลาง) เป็นตัวแทน
+            rightHandY = rightHand.lm[9].y;
+          }
+          
+          // ถ้ามือทั้งสองข้างอยู่สูงกว่าจมูก ถือว่าเป็นการยกมือขึ้น
+          if (leftHand && rightHand && leftHandY < noseY && rightHandY < noseY) {
+            bothHandsUp = true;
+          }
+        }
+        
+        if (bothHandsUp) {
+          if(handsStart==null) handsStart=now; else if((now-handsStart)/1000>THRESH.BOTH_HANDS_UP_SEC) handsAlert=true;
+          // รีเซ็ตการแจ้งเตือนพวงมาลัยเมื่อตรวจพบว่ายกมือขึ้น
+          wheelOffStart = null;
+        } else { 
+          handsStart=null; 
+          // ถ้าไม่มีมือสองข้างที่ยกขึ้น ให้เริ่มจับเวลาละมือจากพวงมาลัย
+          if (handsCount === 0) {
+            if (wheelOffStart === null) {
+                wheelOffStart = now;
+            }
+            if ((now - wheelOffStart) / 1000 > THRESH.WHEEL_OFF_ALERT_SEC) {
+                wheelAlert = true;
+            }
+          } else {
+            // ถ้ามีมือหนึ่งข้าง แต่ไม่ครบสองข้างที่ยกขึ้น ก็ให้รีเซ็ตการจับเวลา
+            wheelOffStart = null;
+          }
+        }
 
         frameCount++;
         let phoneBoxes = lastPhoneDetections;
@@ -382,21 +427,6 @@
         if(phoneBoxes?.length){ phone = true; } else { phone=false; }
         phoneAlert = phone;
         
-        // --- Wheel Detection
-        if (hands.length > 0) {
-            wheelOffStart = null;
-            wheelAlert = false;
-        } else {
-            if (wheelOffStart === null) {
-                wheelOffStart = now;
-            }
-            if ((now - wheelOffStart) / 1000 > THRESH.WHEEL_OFF_ALERT_SEC) {
-                wheelAlert = true;
-            } else {
-                wheelAlert = false;
-            }
-        }
-        
         updateStatusIcons({ eyeAlert, yawnAlert, handsAlert, phoneAlert, wheelAlert, faceLost, yawAlertText, pitchAlertText });
 
       }catch(e){ console.error('loop error',e); }
@@ -404,7 +434,12 @@
     }
 
     btnCalib.addEventListener('click', async ()=>{
-      btnCalib.disabled = true;
+      if(!isRunning){
+        btnCalib.disabled = true;
+      }
+      // ซ่อน alert box ชั่วคราวเมื่อเริ่มกระบวนการ Calibrate
+      alertBox.classList.remove('show');
+
       try{
         if(!video.srcObject){ await startCam(); }
         if(!modelsReady){ await initModels(); }
