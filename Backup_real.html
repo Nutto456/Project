@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-  <title>Drowsiness Detection</title>
+  <title>Real-time Driver Monitoring System</title>
   <link rel="icon" href="data:,">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -14,15 +14,39 @@
     #video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
     #overlay { position: absolute; inset: 0; transform: scaleX(-1); }
     /* เพิ่ม z-index ให้ action-bar เพื่อให้ปุ่มอยู่ด้านบนสุด */
-    .action-bar { position: fixed; inset: auto 1rem 1rem 1rem; padding-bottom: calc(var(--safe-area-inset-bottom) + 0.5rem); z-index: 60; }
+    .action-bar { position: fixed; inset: auto 1rem 1rem 1rem; padding-bottom: calc(var(--safe-inset-bottom) + 0.5rem); z-index: 60; }
     .status-badge { display: flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 999px; }
     .indicator-group { position: fixed; top: 1rem; right: 1rem; z-index: 50; display: flex; gap: 0.5rem; padding: 0.5rem; background-color: rgba(0, 0, 0, 0.5); backdrop-filter: blur(8px); border-radius: 0.5rem; }
     .indicator-group svg { color: white; }
+    /* เพิ่ม indicator count group */
+    .indicator-count-group {
+      position: fixed;
+      top: 5rem;
+      right: 1rem;
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      padding: 0.5rem;
+      background-color: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(8px);
+      border-radius: 0.5rem;
+      color: white;
+      font-size: 0.75rem;
+    }
+    .indicator-count-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      font-weight: 600;
+    }
+
     .alert-popup { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; padding: 1rem; background-color: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); }
     .alert-popup.show { display: flex; }
     .alert-popup .card { padding: 1.5rem; border-radius: 1.5rem; text-align: center; box-shadow: 0 10px 15px rgba(0,0,0,0.1); }
     .alert-popup .card.success { background-color: #10b981; }
     .alert-popup .card.error { background-color: #dc2626; }
+    .alert-popup .card.warning { background-color: #f59e0b; } /* สีเหลือง Amber-500 */
     .alert-popup .card h2 { font-size: 1.5rem; font-weight: bold; color: white; margin-bottom: 0.5rem; }
     .alert-popup .card p { color: rgba(255, 255, 255, 0.8); }
     .alert-popup svg.animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
@@ -33,8 +57,8 @@
 <body class="bg-slate-900 min-h-screen text-white">
   <main class="mx-auto max-w-5xl p-4">
     <header class="mb-3 text-center">
-      <h1 class="text-2xl font-bold">Drowsiness Detection</h1>
-      <p class="text-slate-400 text-sm">ตรวจจับการหลับในแบบเรียลไทม์</p>
+      <h1 class="text-2xl font-bold">Real-time Driver Monitoring System</h1>
+      <p class="text-slate-400 text-sm">ตรวจจับการขับขี่ในแบบเรียลไทม์</p>
     </header>
 
     <section class="video-wrap mx-auto rounded-xl overflow-hidden bg-gray-800">
@@ -57,16 +81,36 @@
       </div>
     </div>
     
-    <div class="indicator-group" style="top: 5rem; right: 1rem; border-radius: 0.5rem; background-color: rgba(0,0,0,0.5);">
-      <span class="text-xs font-semibold text-white">Blinks: </span>
-      <span id="blinkCount" class="text-xs font-semibold text-white">0</span>
+    <div class="indicator-count-group">
+      <div class="indicator-count-item">
+        <span>Blinks:</span>
+        <span id="blinkCount">0</span>
+      </div>
+      <div class="indicator-count-item">
+        <span>Eyes:</span>
+        <span id="eyesCount">0</span>
+      </div>
+      <div class="indicator-count-item">
+        <span>Yawn:</span>
+        <span id="yawnCount">0</span>
+      </div>
+      <div class="indicator-count-item">
+        <span>Phone:</span>
+        <span id="phoneCount">0</span>
+      </div>
+      <div class="indicator-count-item">
+        <span>Hands:</span>
+        <span id="handsCount">0</span>
+      </div>
+      <div class="indicator-count-item">
+        <span>Wheel:</span>
+        <span id="wheelCount">0</span>
+      </div>
     </div>
 
     <div id="alertBox" class="alert-popup">
-      <div id="alertCard" class="card error">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-24 h-24 mx-auto mb-2 text-white animate-pulse"><path fill-rule="evenodd" d="M9.401 3.003c1.155-2.06 4.017-2.06 5.173 0L21.41 12.87c1.155 2.059-.44 4.637-2.887 4.637H5.478c-2.447 0-4.042-2.578-2.886-4.637L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zM12 15a.75.75 0 100 1.5.75.75 0 000-1.5z" clip-rule="evenodd" /></svg>
+      <div id="alertCard" class="card">
         <h2 id="alertText"></h2>
-        <p>กรุณาให้ความสนใจกับการขับขี่!</p>
       </div>
     </div>
 
@@ -77,7 +121,7 @@
   </main>
 
   <audio id="sndEyes"  src="./static/Sound/eyeclosed_alert.mp3" preload="auto"></audio>
-  <audio id="sndYawn"  src="./static/Sound/Yawn_alert.mp3" preload="auto"></audio>
+  <audio id="sndYawn"  src="./static/Sound/Yawn_alert.mpod" preload="auto"></audio>
   <audio id="sndHands" src="./static/Sound/both_hand_alert.mp3" preload="auto"></audio>
   <audio id="sndPhone" src="./static/Sound/phone_alert.mp3" preload="auto"></audio>
 
@@ -94,7 +138,7 @@
     const alertBox = document.getElementById('alertBox');
     const alertText = document.getElementById('alertText');
     const alertCard = document.getElementById('alertCard');
-
+    
     const eyesStatusIcon = document.getElementById('eyesStatus');
     const phoneStatusIcon = document.getElementById('phoneStatus');
     const handsStatusIcon = document.getElementById('handsStatus');
@@ -105,23 +149,28 @@
     const sndHands = document.getElementById('sndHands');
     const sndPhone = document.getElementById('sndPhone');
     
-    // New Blink Counter element
+    // New Counter elements
     const blinkCountDisplay = document.getElementById('blinkCount');
+    const eyesCountDisplay = document.getElementById('eyesCount');
+    const yawnCountDisplay = document.getElementById('yawnCount');
+    const phoneCountDisplay = document.getElementById('phoneCount');
+    const handsCountDisplay = document.getElementById('handsCount');
+    const wheelCountDisplay = document.getElementById('wheelCount');
 
     // === Config
     const THRESH = {
-      EYE_CLOSED: 0.13,
+      EYE_CLOSED: 0.12,
       YAWN: 0.25,
       EYE_CLOSED_SEC: 1.0,
       YAWN_SEC: 2.0,
       BOTH_HANDS_UP_SEC: 2,
       PITCH_DOWN: 5, // Adjusted threshold
       PITCH_UP: -10, // Adjusted threshold
-      YAW_LEFT: 5,  // Adjusted threshold
+      YAW_LEFT: 7,  // Adjusted threshold
       YAW_RIGHT: -10, // Adjusted threshold
       HOLD_SEC: 1.0,
-      PHONE_SCORE: 0.50,
-      PHONE_CADENCE: 12,
+      PHONE_SCORE: 0.40,
+      PHONE_CADENCE: 6,
       WHEEL_OFF_ALERT_SEC: 3,
       FACE_LOST_ALERT_SEC: 2.0
     };
@@ -144,9 +193,21 @@
     let frameCount = 0;
     const poseGain = 1.2, yawGain = 2.0, pitchGain = 1.4;
     
-    // New Blink Counter variables
+    // New Counter variables
     let blinkCount = 0;
+    let eyesCount = 0;
+    let yawnCount = 0;
+    let phoneCount = 0;
+    let handsCount = 0;
+    let wheelCount = 0;
+    
+    // Status variables to prevent counting every frame
     let isEyeClosed = false;
+    let hasAlertedEyes = false;
+    let hasAlertedYawn = false;
+    let hasAlertedPhone = false;
+    let hasAlertedHands = false;
+    let hasAlertedWheel = false;
 
     // === Utils
     const ema = (p,v,a=0.35)=>(!Number.isFinite(v)?p:(p==null?v:a*v+(1-a)*p));
@@ -227,60 +288,97 @@
     function updateStatusIcons(v){
       const alerts = [];
       
-      eyesStatusIcon.style.backgroundColor = '';
-      phoneStatusIcon.style.backgroundColor = '';
-      handsStatusIcon.style.backgroundColor = '';
-      wheelStatusIcon.style.backgroundColor = '';
-      
-      alertCard.classList.remove('success');
-      alertCard.classList.add('error');
-      
-      blinkCountDisplay.textContent = blinkCount;
+      // --- ค่าสีสำหรับการแจ้งเตือน ---
+      const red = '#dc2626';    // Tailwind red-600
+      const yellow = '#f59e0b'; // Tailwind amber-500
+      const green = '#10b981';  // Tailwind green-500
+      const defaultColor = ''; // สีเขียวปกติจาก CSS
 
+      // --- รีเซ็ตสีของไอคอนสถานะ (Badge) ---
+      eyesStatusIcon.style.backgroundColor = defaultColor;
+      phoneStatusIcon.style.backgroundColor = defaultColor;
+      handsStatusIcon.style.backgroundColor = defaultColor;
+      wheelStatusIcon.style.backgroundColor = defaultColor;
+
+      // --- ตรรกะการแจ้งเตือน ---
+
+      // 1. ตรวจจับการปิดตา (สีแดงเสมอ)
       if (v.eyeAlert) {
-          eyesStatusIcon.style.backgroundColor = '#dc2626'; // Red
+          eyesStatusIcon.style.backgroundColor = red;
           alerts.push('ดวงตาปิด');
       }
+      
+      // 2. ตรวจจับการหาว (เขียว -> เหลือง -> แดง)
       if (v.yawnAlert) {
-          eyesStatusIcon.style.backgroundColor = '#dc2626'; // Red
           alerts.push('หาว');
+          if (yawnCount >= 3) {
+            eyesStatusIcon.style.backgroundColor = red;
+          } else if (yawnCount === 2) {
+            eyesStatusIcon.style.backgroundColor = yellow;
+          } else { // หาวครั้งที่ 1
+            eyesStatusIcon.style.backgroundColor = green;
+          }
       }
+
+      // 3. ตรวจจับโทรศัพท์ (ใช้สีแดงตามเดิม)
       if (v.phoneAlert) {
-          phoneStatusIcon.style.backgroundColor = '#dc2626'; // Red
+          phoneStatusIcon.style.backgroundColor = red;
           alerts.push('ใช้โทรศัพท์');
       }
+      
+      // 4. ตรวจจับมือ (ใช้สีแดงตามเดิม)
       if (v.handsAlert) {
-          handsStatusIcon.style.backgroundColor = '#dc2626'; // Red
+          handsStatusIcon.style.backgroundColor = red;
           alerts.push('มือทั้งสองข้างขึ้น');
       }
+
+      // 5. ตรวจจับการละมือจากพวงมาลัย (สีแดงเสมอ)
       if (v.wheelAlert) {
-          wheelStatusIcon.style.backgroundColor = '#dc2626'; // Red
+          wheelStatusIcon.style.backgroundColor = red;
           alerts.push('ละมือจากพวงมาลัย');
       }
-      if (v.faceLost) {
-          alerts.push('ไม่พบใบหน้า');
-      }
+
+      // 6. การแจ้งเตือนอื่นๆ
+      if (v.faceLost) { alerts.push('ไม่พบใบหน้า'); }
+      if (v.yawAlertText) { alerts.push(v.yawAlertText); }
+      if (v.pitchAlertText) { alerts.push(v.pitchAlertText); }
       
-      // Pose Alerts (Yaw/Pitch)
-      if (v.yawAlertText) {
-          alerts.push(v.yawAlertText);
-      }
-      if (v.pitchAlertText) {
-          alerts.push(v.pitchAlertText);
-      }
-      
+      // --- ควบคุมการแสดงผล Popup แจ้งเตือน ---
       if(alerts.length){
         alertText.textContent = alerts.join(' / ');
+        alertCard.classList.remove('success', 'error', 'warning'); // รีเซ็ตคลาสสีก่อน
+
+        // กำหนดสีของ Popup ตามลำดับความสำคัญ (แดง > เหลือง > เขียว)
+        if (v.eyeAlert || v.wheelAlert || yawnCount >= 3 || v.phoneAlert || v.handsAlert || v.faceLost) {
+            alertCard.classList.add('error'); // การแจ้งเตือนร้ายแรงเป็นสีแดง
+        } else if (yawnCount === 2) {
+            alertCard.classList.add('warning'); // หาวครั้งที่ 2 เป็นสีเหลือง
+        } else if (yawnCount === 1 || v.yawAlertText || v.pitchAlertText) {
+            alertCard.classList.add('success'); // หาวครั้งแรก, หันหน้า เป็นสีเขียว
+        }
+
         alertBox.classList.add('show');
+
+        // --- ควบคุมเสียง (ยังทำงานเหมือนเดิม) ---
         if(v.eyeAlert) playLoop('EYES',sndEyes); else stopLoop('EYES',sndEyes);
         if(v.yawnAlert) playLoop('YAWN',sndYawn); else stopLoop('YAWN',sndYawn);
         if(v.phoneAlert) playLoop('PHONE',sndPhone); else stopLoop('PHONE',sndPhone);
-        if(v.handsAlert) playLoop('HANDS',sndHands); else stopLoop('HANDS',sndHands);
-        if(v.wheelAlert) playLoop('WHEEL',sndHands);
+        if(v.handsAlert) playLoop('HANDS',sndHands);
+        // หมายเหตุ: เสียงเตือนพวงมาลัยใช้เสียงเดียวกับ 'ละมือ' (sndHands)
+        if(v.wheelAlert) playLoop('WHEEL',sndHands); else if (!v.handsAlert) { stopLoop('WHEEL',sndHands); }
+
       } else {
         alertBox.classList.remove('show');
         stopAll();
       }
+
+      // --- อัปเดตตัวนับ (ยังทำงานเหมือนเดิม) ---
+      blinkCountDisplay.textContent = blinkCount;
+      eyesCountDisplay.textContent = eyesCount;
+      yawnCountDisplay.textContent = yawnCount;
+      phoneCountDisplay.textContent = phoneCount;
+      handsCountDisplay.textContent = handsCount;
+      wheelCountDisplay.textContent = wheelCount;
     }
 
     const rVFC = video.requestVideoFrameCallback?.bind(video);
@@ -341,20 +439,38 @@
           const EAR = ear(face, EYE_L)*0.5 + ear(face, EYE_R)*0.5;
           const MAR = marSimple(face);
           
-          // Blink Counter Logic
+          // Blink Counter Logic and alert
           if (EAR < THRESH.EYE_CLOSED) {
             isEyeClosed = true;
-            if(eyeStart==null) eyeStart=now; else if((now-eyeStart)/1000>THRESH.EYE_CLOSED_SEC) eyeAlert=true;
-          } else {
-            if (isEyeClosed) {
-              blinkCount++; // Increment on eye opening after being closed
+            if(eyeStart==null) { eyeStart=now; } 
+            else if((now-eyeStart)/1000>THRESH.EYE_CLOSED_SEC) {
+              eyeAlert=true;
+              if (!hasAlertedEyes) {
+                eyesCount++; 
+                hasAlertedEyes = true;
+              }
             }
+          } else {
+            if (isEyeClosed) { blinkCount++; }
             isEyeClosed = false;
             eyeStart = null;
+            hasAlertedEyes = false; // Reset status
           }
           
-          if(MAR > THRESH.YAWN){ if(yawnStart==null) yawnStart=now; else if((now-yawnStart)/1000>THRESH.YAWN_SEC) yawnAlert=true; }
-          else { yawnStart=null; }
+          if(MAR > THRESH.YAWN){ 
+            if(yawnStart==null) { yawnStart=now; }
+            else if((now-yawnStart)/1000>THRESH.YAWN_SEC) {
+              yawnAlert=true;
+              if (!hasAlertedYawn) {
+                yawnCount++;
+                hasAlertedYawn = true;
+              }
+            }
+          } else { 
+            yawnStart=null; 
+            hasAlertedYawn = false; // Reset status
+          }
+
           faceLastSeen = now/1000;
           
         } else {
@@ -393,11 +509,19 @@
         }
         
         if (bothHandsUp) {
-          if(handsStart==null) handsStart=now; else if((now-handsStart)/1000>THRESH.BOTH_HANDS_UP_SEC) handsAlert=true;
+          if(handsStart==null) { handsStart=now; }
+          else if((now-handsStart)/1000>THRESH.BOTH_HANDS_UP_SEC) {
+            handsAlert=true;
+            if (!hasAlertedHands) {
+              handsCount++;
+              hasAlertedHands = true;
+            }
+          }
           // รีเซ็ตการแจ้งเตือนพวงมาลัยเมื่อตรวจพบว่ายกมือขึ้น
           wheelOffStart = null;
         } else { 
           handsStart=null; 
+          hasAlertedHands = false; // Reset status
           // ถ้าไม่มีมือสองข้างที่ยกขึ้น ให้เริ่มจับเวลาละมือจากพวงมาลัย
           if (handsCount === 0) {
             if (wheelOffStart === null) {
@@ -405,10 +529,15 @@
             }
             if ((now - wheelOffStart) / 1000 > THRESH.WHEEL_OFF_ALERT_SEC) {
                 wheelAlert = true;
+                if (!hasAlertedWheel) {
+                  wheelCount++;
+                  hasAlertedWheel = true;
+                }
             }
           } else {
             // ถ้ามีมือหนึ่งข้าง แต่ไม่ครบสองข้างที่ยกขึ้น ก็ให้รีเซ็ตการจับเวลา
             wheelOffStart = null;
+            hasAlertedWheel = false; // Reset status
           }
         }
 
@@ -424,7 +553,16 @@
           }
           phoneBoxes = boxes; lastPhoneDetections = boxes;
         }
-        if(phoneBoxes?.length){ phone = true; } else { phone=false; }
+        if(phoneBoxes?.length){ 
+          phone = true;
+          if (!hasAlertedPhone) {
+            phoneCount++;
+            hasAlertedPhone = true;
+          }
+        } else { 
+          phone=false; 
+          hasAlertedPhone = false; // Reset status
+        }
         phoneAlert = phone;
         
         updateStatusIcons({ eyeAlert, yawnAlert, handsAlert, phoneAlert, wheelAlert, faceLost, yawAlertText, pitchAlertText });
@@ -490,8 +628,19 @@
             return;
           }
           isRunning = true; btnToggle.textContent='Stop';
-          // Reset blink counter
+          // Reset all counters and status flags
           blinkCount = 0;
+          eyesCount = 0;
+          yawnCount = 0;
+          phoneCount = 0;
+          handsCount = 0;
+          wheelCount = 0;
+          hasAlertedEyes = false;
+          hasAlertedYawn = false;
+          hasAlertedPhone = false;
+          hasAlertedHands = false;
+          hasAlertedWheel = false;
+          
           scheduleNext(loop);
         }catch(err){ 
           console.error(err);

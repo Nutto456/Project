@@ -14,7 +14,7 @@
     #video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
     #overlay { position: absolute; inset: 0; transform: scaleX(-1); }
     /* เพิ่ม z-index ให้ action-bar เพื่อให้ปุ่มอยู่ด้านบนสุด */
-    .action-bar { position: fixed; inset: auto 1rem 1rem 1rem; padding-bottom: calc(var(--safe-area-inset-bottom) + 0.5rem); z-index: 60; }
+    .action-bar { position: fixed; inset: auto 1rem 1rem 1rem; padding-bottom: calc(var(--safe-inset-bottom) + 0.5rem); z-index: 60; }
     .status-badge { display: flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 999px; }
     .indicator-group { position: fixed; top: 1rem; right: 1rem; z-index: 50; display: flex; gap: 0.5rem; padding: 0.5rem; background-color: rgba(0, 0, 0, 0.5); backdrop-filter: blur(8px); border-radius: 0.5rem; }
     .indicator-group svg { color: white; }
@@ -46,6 +46,7 @@
     .alert-popup .card { padding: 1.5rem; border-radius: 1.5rem; text-align: center; box-shadow: 0 10px 15px rgba(0,0,0,0.1); }
     .alert-popup .card.success { background-color: #10b981; }
     .alert-popup .card.error { background-color: #dc2626; }
+    .alert-popup .card.warning { background-color: #f59e0b; } /* สีเหลือง Amber-500 */
     .alert-popup .card h2 { font-size: 1.5rem; font-weight: bold; color: white; margin-bottom: 0.5rem; }
     .alert-popup .card p { color: rgba(255, 255, 255, 0.8); }
     .alert-popup svg.animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
@@ -108,11 +109,8 @@
     </div>
 
     <div id="alertBox" class="alert-popup">
-      <div id="alertCard" class="card error">
-        <div id="alertIcon" class="mb-2">
-            </div>
+      <div id="alertCard" class="card">
         <h2 id="alertText"></h2>
-        <p>กรุณาให้ความสนใจกับการขับขี่!</p>
       </div>
     </div>
 
@@ -130,16 +128,6 @@
   <script type="module">
     import { FaceLandmarker, HandLandmarker, ObjectDetector, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
-    // SVG icons
-    const icons = {
-        exclamation: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-24 h-24 mx-auto mb-2 text-white animate-pulse"><path fill-rule="evenodd" d="M9.401 3.003c1.155-2.06 4.017-2.06 5.173 0L21.41 12.87c1.155 2.059-.44 4.637-2.887 4.637H5.478c-2.447 0-4.042-2.578-2.886-4.637L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zM12 15a.75.75 0 100 1.5.75.75 0 000-1.5z" clip-rule="evenodd" /></svg>',
-        sleep: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-24 h-24 mx-auto mb-2 text-white animate-pulse"><path d="M7.5 7.5a3 3 0 100 6h9a3 3 0 100-6h-9zM12 3a3 3 0 110 6h-3V3h3zm0 12a3 3 0 110 6h-3v-6h3z" /></svg>',
-        yawn: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-24 h-24 mx-auto mb-2 text-white animate-pulse"><path d="M12 21a9 9 0 100-18 9 9 0 000 18zM8.25 10.5a.75.75 0 01.75-.75h2.25v2.25a.75.75 0 01-1.5 0V11.25H9a.75.75 0 01-.75-.75zM15 11.25H12.75v-2.25a.75.75 0 011.5 0v2.25H15a.75.75 0 01.75-.75.75.75 0 01-.75.75zM12 17.25a.75.75 0 000 1.5h.75a.75.75 0 000-1.5H12zm-3.75.75a.75.75 0 01-.75-.75v-3.75a.75.75 0 011.5 0v3a.75.75 0 001.5 0v-3a.75.75 0 011.5 0v3a.75.75 0 001.5 0v-3a.75.75 0 011.5 0v3.75a.75.75 0 01-.75.75h-7.5z" /></svg>',
-        phone: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-24 h-24 mx-auto mb-2 text-white animate-pulse"><path fill-rule="evenodd" d="M1.5 4.5a3 3 0 013-3h15a3 3 0 013 3v13.5a3 3 0 01-3 3h-15a3 3 0 01-3-3V4.5zM15.5 8a.5.5 0 00-.5.5v7a.5.5 0 001 0V8.5a.5.5 0 00-.5-.5zM18.5 8a.5.5 0 00-.5.5v7a.5.5 0 001 0V8.5a.5.5 0 00-.5-.5z" clip-rule="evenodd" /></svg>',
-        hands: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-24 h-24 mx-auto mb-2 text-white animate-pulse"><path d="M12 2a1 1 0 011 1v4.25a.75.75 0 001.5 0V3a2.5 2.5 0 015 0v4.25a.75.75 0 001.5 0V3a4 4 0 00-8 0v4.5a.75.75 0 001.5 0v-4zM12 12a1 1 0 011 1v4.25a.75.75 0 001.5 0V13a2.5 2.5 0 015 0v4.25a.75.75 0 001.5 0V13a4 4 0 00-8 0v4.5a.75.75 0 001.5 0v-4z" /></svg>',
-        wheel: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-24 h-24 mx-auto mb-2 text-white animate-pulse"><path fill-rule="evenodd" d="M12 21a9 9 0 100-18 9 9 0 000 18zM10.5 12a.75.75 0 00-.75-.75h-2.5a.75.75 0 000 1.5h2.5a.75.75 0 00.75-.75zM16 12a.75.75 0 00-.75-.75h-2.5a.75.75 0 000 1.5h2.5a.75.75 0 00.75-.75z" clip-rule="evenodd" /></svg>'
-    };
-
     // === Elements
     const video = document.getElementById('video');
     const canvas = document.getElementById('overlay');
@@ -150,8 +138,7 @@
     const alertBox = document.getElementById('alertBox');
     const alertText = document.getElementById('alertText');
     const alertCard = document.getElementById('alertCard');
-    const alertIcon = document.getElementById('alertIcon');
-
+    
     const eyesStatusIcon = document.getElementById('eyesStatus');
     const phoneStatusIcon = document.getElementById('phoneStatus');
     const handsStatusIcon = document.getElementById('handsStatus');
@@ -172,14 +159,14 @@
 
     // === Config
     const THRESH = {
-      EYE_CLOSED: 0.13,
+      EYE_CLOSED: 0.12,
       YAWN: 0.25,
       EYE_CLOSED_SEC: 1.0,
       YAWN_SEC: 2.0,
       BOTH_HANDS_UP_SEC: 2,
       PITCH_DOWN: 5, // Adjusted threshold
       PITCH_UP: -10, // Adjusted threshold
-      YAW_LEFT: 5,  // Adjusted threshold
+      YAW_LEFT: 7,  // Adjusted threshold
       YAW_RIGHT: -10, // Adjusted threshold
       HOLD_SEC: 1.0,
       PHONE_SCORE: 0.40,
@@ -301,65 +288,91 @@
     function updateStatusIcons(v){
       const alerts = [];
       
-      // Update badge colors and alert counts
-      const orange = '#ea580c'; // Tailwind orange-600
-      const red = '#dc2626'; // Tailwind red-600
-      const green = ''; // Default background is green
+      // --- ค่าสีสำหรับการแจ้งเตือน ---
+      const red = '#dc2626';    // Tailwind red-600
+      const yellow = '#f59e0b'; // Tailwind amber-500
+      const green = '#10b981';  // Tailwind green-500
+      const defaultColor = ''; // สีเขียวปกติจาก CSS
 
+      // --- รีเซ็ตสีของไอคอนสถานะ (Badge) ---
+      eyesStatusIcon.style.backgroundColor = defaultColor;
+      phoneStatusIcon.style.backgroundColor = defaultColor;
+      handsStatusIcon.style.backgroundColor = defaultColor;
+      wheelStatusIcon.style.backgroundColor = defaultColor;
+
+      // --- ตรรกะการแจ้งเตือน ---
+
+      // 1. ตรวจจับการปิดตา (สีแดงเสมอ)
       if (v.eyeAlert) {
-          eyesStatusIcon.style.backgroundColor = (eyesCount > 0) ? red : orange;
+          eyesStatusIcon.style.backgroundColor = red;
           alerts.push('ดวงตาปิด');
-      } else { eyesStatusIcon.style.backgroundColor = green; }
-      if (v.yawnAlert) {
-          eyesStatusIcon.style.backgroundColor = (yawnCount > 0) ? red : orange;
-          alerts.push('หาว');
       }
-      if (v.phoneAlert) {
-          phoneStatusIcon.style.backgroundColor = (phoneCount > 0) ? red : orange;
-          alerts.push('ใช้โทรศัพท์');
-      } else { phoneStatusIcon.style.backgroundColor = green; }
-      if (v.handsAlert) {
-          handsStatusIcon.style.backgroundColor = (handsCount > 0) ? red : orange;
-          alerts.push('มือทั้งสองข้างขึ้น');
-      } else { handsStatusIcon.style.backgroundColor = green; }
-      if (v.wheelAlert) {
-          wheelStatusIcon.style.backgroundColor = (wheelCount > 0) ? red : orange;
-          alerts.push('ละมือจากพวงมาลัย');
-      } else { wheelStatusIcon.style.backgroundColor = green; }
+      
+      // 2. ตรวจจับการหาว (เขียว -> เหลือง -> แดง)
+      if (v.yawnAlert) {
+          alerts.push('หาว');
+          if (yawnCount >= 3) {
+            eyesStatusIcon.style.backgroundColor = red;
+          } else if (yawnCount === 2) {
+            eyesStatusIcon.style.backgroundColor = yellow;
+          } else { // หาวครั้งที่ 1
+            eyesStatusIcon.style.backgroundColor = green;
+          }
+      }
 
+      // 3. ตรวจจับโทรศัพท์ (ใช้สีแดงตามเดิม)
+      if (v.phoneAlert) {
+          phoneStatusIcon.style.backgroundColor = red;
+          alerts.push('ใช้โทรศัพท์');
+      }
+      
+      // 4. ตรวจจับมือ (ใช้สีแดงตามเดิม)
+      if (v.handsAlert) {
+          handsStatusIcon.style.backgroundColor = red;
+          alerts.push('มือทั้งสองข้างขึ้น');
+      }
+
+      // 5. ตรวจจับการละมือจากพวงมาลัย (สีแดงเสมอ)
+      if (v.wheelAlert) {
+          wheelStatusIcon.style.backgroundColor = red;
+          alerts.push('ละมือจากพวงมาลัย');
+      }
+
+      // 6. การแจ้งเตือนอื่นๆ
       if (v.faceLost) { alerts.push('ไม่พบใบหน้า'); }
       if (v.yawAlertText) { alerts.push(v.yawAlertText); }
       if (v.pitchAlertText) { alerts.push(v.pitchAlertText); }
       
-      // Update alert box and icon
+      // --- ควบคุมการแสดงผล Popup แจ้งเตือน ---
       if(alerts.length){
         alertText.textContent = alerts.join(' / ');
-        alertBox.classList.add('show');
-        
-        // Choose appropriate icon based on the most recent alert
-        if (v.eyeAlert || v.yawnAlert) {
-            alertIcon.innerHTML = icons.sleep;
-        } else if (v.handsAlert) {
-            alertIcon.innerHTML = icons.hands;
-        } else if (v.phoneAlert) {
-            alertIcon.innerHTML = icons.phone;
-        } else if (v.wheelAlert) {
-            alertIcon.innerHTML = icons.wheel;
-        } else {
-            alertIcon.innerHTML = icons.exclamation;
+        alertCard.classList.remove('success', 'error', 'warning'); // รีเซ็ตคลาสสีก่อน
+
+        // กำหนดสีของ Popup ตามลำดับความสำคัญ (แดง > เหลือง > เขียว)
+        if (v.eyeAlert || v.wheelAlert || yawnCount >= 3 || v.phoneAlert || v.handsAlert || v.faceLost) {
+            alertCard.classList.add('error'); // การแจ้งเตือนร้ายแรงเป็นสีแดง
+        } else if (yawnCount === 2) {
+            alertCard.classList.add('warning'); // หาวครั้งที่ 2 เป็นสีเหลือง
+        } else if (yawnCount === 1 || v.yawAlertText || v.pitchAlertText) {
+            alertCard.classList.add('success'); // หาวครั้งแรก, หันหน้า เป็นสีเขียว
         }
 
+        alertBox.classList.add('show');
+
+        // --- ควบคุมเสียง (ยังทำงานเหมือนเดิม) ---
         if(v.eyeAlert) playLoop('EYES',sndEyes); else stopLoop('EYES',sndEyes);
         if(v.yawnAlert) playLoop('YAWN',sndYawn); else stopLoop('YAWN',sndYawn);
         if(v.phoneAlert) playLoop('PHONE',sndPhone); else stopLoop('PHONE',sndPhone);
-        if(v.handsAlert) playLoop('HANDS',sndHands); else stopLoop('HANDS',sndHands);
-        if(v.wheelAlert) playLoop('WHEEL',sndHands);
+        if(v.handsAlert) playLoop('HANDS',sndHands);
+        // หมายเหตุ: เสียงเตือนพวงมาลัยใช้เสียงเดียวกับ 'ละมือ' (sndHands)
+        if(v.wheelAlert) playLoop('WHEEL',sndHands); else if (!v.handsAlert) { stopLoop('WHEEL',sndHands); }
+
       } else {
         alertBox.classList.remove('show');
         stopAll();
       }
 
-      // Update counters display
+      // --- อัปเดตตัวนับ (ยังทำงานเหมือนเดิม) ---
       blinkCountDisplay.textContent = blinkCount;
       eyesCountDisplay.textContent = eyesCount;
       yawnCountDisplay.textContent = yawnCount;
