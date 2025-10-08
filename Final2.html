@@ -48,7 +48,6 @@
     .alert-popup .card.warning { background-color: #f59e0b; }
     .alert-popup .card h2 { font-size: 1.5rem; font-weight: bold; color: white; margin-bottom: 0.5rem; }
     .alert-popup .card p { color: rgba(255, 255, 255, 0.8); }
-    .alert-popup svg.animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
   </style>
   <script src="https://cdn.jsdelivr.net/gh/alpinejs/alpine@v2.x.x/dist/alpine.min.js" defer></script>
@@ -81,6 +80,10 @@
     </div>
 
     <div class="indicator-count-group">
+      <div class="indicator-count-item text-lg font-bold">
+        <span>Score:</span>
+        <span id="scoreDisplay">100</span>
+      </div>
       <div class="indicator-count-item">
         <span>Blinks:</span>
         <span id="blinkCount">0</span>
@@ -109,7 +112,9 @@
 
     <div id="alertBox" class="alert-popup">
       <div id="alertCard" class="card">
-        <h2 id="alertText"></h2>
+        <h2 id="alertText" class="text-2xl"></h2>
+        <p id="alertSubText" class="text-white mt-1"></p>
+        <p class="text-slate-200 text-sm mt-4">กรุณาขับขี่ปลอดภัยด้วยนะครับ</p>
       </div>
     </div>
 
@@ -135,7 +140,6 @@
     const btnToggle = document.getElementById('btnToggle');
     const btnCalib = document.getElementById('btnCalib');
     const alertBox = document.getElementById('alertBox');
-    const alertText = document.getElementById('alertText');
     const alertCard = document.getElementById('alertCard');
     
     const eyesStatusIcon = document.getElementById('eyesStatus');
@@ -167,11 +171,11 @@
       YAW_LEFT: 7,
       YAW_RIGHT: -10,
       PHONE_SCORE: 0.55,
-      WHEEL_OFF_ALERT_SEC: 5.0,
+      WHEEL_OFF_ALERT_SEC: 3,
       FACE_LOST_ALERT_SEC: 2.0,
       PHONE_HAND_DISTANCE: 0.25,
       PHONE_LOST_GRACE_SEC: 1.0,
-      HAND_FACE_DISTANCE: 0.5
+      HAND_FACE_DISTANCE: 0.4
     };
     
     // === State
@@ -196,6 +200,8 @@
     let isEyeClosed = false;
     let hasAlertedEyes = false, hasAlertedYawn = false, hasAlertedPhone = false, hasAlertedHands = false, hasAlertedWheel = false;
     let phoneLastSeenTime = null;
+    let driverScore = 100;
+    let lastDeductionTime = {};
 
     // === Utils
     const ema = (p,v,a=0.35)=>(!Number.isFinite(v)?p:(p==null?v:a*v+(1-a)*p));
@@ -207,7 +213,6 @@
     function stopLoop(id, el){ el.pause(); el.currentTime=0; }
     function stopAll(){ stopLoop('EYES',sndEyes); stopLoop('YAWN',sndYawn); stopLoop('HANDS',sndHands); stopLoop('PHONE',sndPhone); }
     
-    // Face indices
     const EYE_L = [33,160,158,133,153,144];
     const EYE_R = [263,387,385,362,380,373];
     const MOUTH_TOP = 13, MOUTH_BOTTOM = 14, MOUTH_LEFT = 61, MOUTH_RIGHT = 291;
@@ -247,7 +252,6 @@
         numHands:2, runningMode:"VIDEO"
       });
       
-      // Load COCO-SSD model
       cocoSsdModel = await cocoSsd.load();
       console.log('COCO-SSD model loaded.');
 
@@ -276,65 +280,97 @@
     }
 
     function updateStatusIcons(v){
-      const alerts = [];
+      const alertTextEl = document.getElementById('alertText');
+      const alertSubTextEl = document.getElementById('alertSubText');
+      const scoreDisplay = document.getElementById('scoreDisplay');
+      scoreDisplay.textContent = Math.max(0, driverScore);
+
+      const alertMessages = {
+        eyeAlert:   { main: 'ตรวจพบการหลับตา', sub: 'กรุณาลืมตาขณะขับขี่ หากไม่ไหวให้จอดพัก' },
+        handsAlert: { main: 'ปล่อยมือทั้งสองข้าง', sub: 'อันตราย! กรุณาควบคุมรถ' },
+        wheelAlert: { main: 'ละมือจากพวงมาลัย', sub: 'กรุณาจับพวงมาลัยให้มั่นคง' },
+        phoneAlert: { main: 'ใช้โทรศัพท์', sub: 'โปรดวางโทรศัพท์และตั้งใจขับรถ' },
+        yawnAlert:  { main: 'ตรวจพบการหาว', sub: 'ความง่วงเป็นสาเหตุของอุบัติเหตุ จอดพักสักครู่' },
+        pitchDown:  { main: 'ก้มหน้า', sub: 'โปรดมองตรงไปข้างหน้า' },
+        pitchUp:    { main: 'เงยหน้า', sub: 'โปรดมองถนนเพื่อความปลอดภัย' },
+        faceLost:   { main: 'ไม่พบใบหน้า', sub: 'กรุณาปรับตำแหน่งกล้องให้อยู่ในมุมที่เหมาะสม' },
+        yawLeft:    { main: 'หันซ้าย', sub: 'โปรดให้ความสนใจกับเส้นทางด้านหน้า' },
+        yawRight:   { main: 'หันขวา', sub: 'โปรดให้ความสนใจกับเส้นทางด้านหน้า' },
+      };
+
+      const alertPriority = [
+        'eyeAlert', 'handsAlert', 'wheelAlert', 'phoneAlert', 'pitchDown', 'pitchUp', 
+        'yawnAlert', 'faceLost', 'yawLeft', 'yawRight'
+      ];
       
-      const red = '#dc2626', yellow = '#f59e0b', green = '#10b981', defaultColor = '';
+      const mainAlerts = [];
+      let subText = '';
+      let alertLevel = 'none';
 
-      eyesStatusIcon.style.backgroundColor = defaultColor;
-      phoneStatusIcon.style.backgroundColor = defaultColor;
-      handsStatusIcon.style.backgroundColor = defaultColor;
-      wheelStatusIcon.style.backgroundColor = defaultColor;
-
-      if (v.eyeAlert) {
-          eyesStatusIcon.style.backgroundColor = red;
-          alerts.push('ดวงตาปิด');
+      if (v.yawAlertText) {
+        const key = v.yawAlertText === 'หันซ้าย' ? 'yawLeft' : 'yawRight';
+        mainAlerts.push(alertMessages[key].main);
+        if (alertLevel === 'none') alertLevel = 'success';
       }
+
+      if (v.pitchAlertText) {
+        const key = v.pitchAlertText === 'ก้มหน้า' ? 'pitchDown' : 'pitchUp';
+        mainAlerts.push(alertMessages[key].main);
+        alertLevel = 'error';
+      }
+
+      if (v.eyeAlert)   { mainAlerts.push(alertMessages.eyeAlert.main);   alertLevel = 'error'; }
+      if (v.handsAlert) { mainAlerts.push(alertMessages.handsAlert.main); alertLevel = 'error'; }
+      if (v.wheelAlert) { mainAlerts.push(alertMessages.wheelAlert.main); alertLevel = 'error'; }
+      if (v.phoneAlert) { mainAlerts.push(alertMessages.phoneAlert.main); alertLevel = 'error'; }
+      if (v.faceLost)   { mainAlerts.push(alertMessages.faceLost.main);   alertLevel = 'error'; }
+      
       if (v.yawnAlert) {
-          alerts.push('หาว');
-          if (yawnCount >= 3) { eyesStatusIcon.style.backgroundColor = red; }
-          else if (yawnCount === 2) { eyesStatusIcon.style.backgroundColor = yellow; }
-          else { eyesStatusIcon.style.backgroundColor = green; }
-      }
-      if (v.phoneAlert) {
-          phoneStatusIcon.style.backgroundColor = red;
-          alerts.push('ใช้โทรศัพท์');
-      }
-      if (v.handsAlert) {
-          handsStatusIcon.style.backgroundColor = red;
-          alerts.push('มือทั้งสองข้างขึ้น');
-      }
-      if (v.wheelAlert) {
-          wheelStatusIcon.style.backgroundColor = red;
-          alerts.push('ละมือจากพวงมาลัย');
-      }
-      if (v.faceLost) { alerts.push('ไม่พบใบหน้า'); }
-      if (v.yawAlertText) { alerts.push(v.yawAlertText); }
-      if (v.pitchAlertText) { alerts.push(v.pitchAlertText); }
-      
-      if(alerts.length){
-        alertText.textContent = alerts.join(' / ');
-        alertCard.classList.remove('success', 'error', 'warning');
-
-        if (v.eyeAlert || v.wheelAlert || yawnCount >= 3 || v.phoneAlert || v.handsAlert || v.faceLost) {
-            alertCard.classList.add('error');
-        } else if (yawnCount === 2) {
-            alertCard.classList.add('warning');
-        } else if (yawnCount === 1 || v.yawAlertText || v.pitchAlertText) {
-            alertCard.classList.add('success');
+        mainAlerts.push(alertMessages.yawnAlert.main);
+        if (yawnCount >= 3) {
+            alertLevel = 'error';
+        } else if (yawnCount === 2 && alertLevel !== 'error') {
+            alertLevel = 'warning';
+        } else if (alertLevel === 'none') {
+            alertLevel = 'success';
         }
+      }
 
+      if (mainAlerts.length > 0) {
+        for (const key of alertPriority) {
+          if (mainAlerts.includes(alertMessages[key]?.main)) {
+            subText = alertMessages[key].sub;
+            break;
+          }
+        }
+        alertTextEl.textContent = mainAlerts.join(' / ');
+        alertSubTextEl.textContent = subText;
+        alertCard.classList.remove('success', 'error', 'warning');
+        if (alertLevel !== 'none') {
+          alertCard.classList.add(alertLevel);
+        }
         alertBox.classList.add('show');
-
-        if(v.eyeAlert) playLoop('EYES',sndEyes); else stopLoop('EYES',sndEyes);
-        if(v.yawnAlert) playLoop('YAWN',sndYawn); else stopLoop('YAWN',sndYawn);
-        if(v.phoneAlert) playLoop('PHONE',sndPhone); else stopLoop('PHONE',sndPhone);
-        if(v.handsAlert) playLoop('HANDS',sndHands);
-        if(v.wheelAlert) playLoop('WHEEL',sndHands); else if (!v.handsAlert) { stopLoop('WHEEL',sndHands); }
-
       } else {
         alertBox.classList.remove('show');
-        stopAll();
       }
+      
+      const red = '#dc2626', yellow = '#f59e0b', green = '#10b981', defaultColor = '';
+      eyesStatusIcon.style.backgroundColor = (v.eyeAlert || (v.pitchAlertText && alertLevel === 'error')) ? red : defaultColor;
+      if (v.yawnAlert) {
+        if (yawnCount >= 3) { eyesStatusIcon.style.backgroundColor = red; }
+        else if (yawnCount === 2) { eyesStatusIcon.style.backgroundColor = yellow; }
+        else { eyesStatusIcon.style.backgroundColor = green; }
+      }
+      phoneStatusIcon.style.backgroundColor = v.phoneAlert ? red : defaultColor;
+      handsStatusIcon.style.backgroundColor = v.handsAlert ? red : defaultColor;
+      wheelStatusIcon.style.backgroundColor = v.wheelAlert ? red : defaultColor;
+
+      if(v.eyeAlert) playLoop('EYES',sndEyes); else stopLoop('EYES',sndEyes);
+      if(v.yawnAlert) playLoop('YAWN',sndYawn); else stopLoop('YAWN',sndYawn);
+      if(v.phoneAlert) playLoop('PHONE',sndPhone); else stopLoop('PHONE',sndPhone);
+      if(v.handsAlert) playLoop('HANDS',sndHands);
+      if(v.wheelAlert) playLoop('WHEEL',sndHands); else if (!v.handsAlert) { stopLoop('WHEEL',sndHands); }
+      if (!v.eyeAlert && !v.yawnAlert && !v.phoneAlert && !v.handsAlert && !v.wheelAlert) stopAll();
 
       blinkCountDisplay.textContent = blinkCount;
       eyesCountDisplay.textContent = eyesCount;
@@ -461,8 +497,6 @@
           wheelOffStart = null; hasAlertedWheel = false;
         }
 
-        // --- START: COCO-SSD PHONE DETECTION LOGIC ---
-        frameCount++;
         let phoneBoxes = []; 
         if (phoneReady && cocoSsdModel) {
           const predictions = await cocoSsdModel.detect(video);
@@ -474,7 +508,6 @@
               });
             }
           }
-          lastPhoneDetections = phoneBoxes;
         }
 
         let isPhoneDetectedThisFrame = false;
@@ -510,7 +543,34 @@
           phoneLastSeenTime = null;
         }
         phoneAlert = phone;
-        // --- END: COCO-SSD PHONE DETECTION LOGIC ---
+        
+        const nowMs = performance.now();
+        const DEDUCTION_COOLDOWN = 5000;
+
+        if (pitchAlertText) {
+            if (!lastDeductionTime.pose || (nowMs - lastDeductionTime.pose) > DEDUCTION_COOLDOWN) {
+                driverScore -= 5;
+                lastDeductionTime.pose = nowMs;
+            }
+        }
+        if (eyeAlert) {
+            if (!lastDeductionTime.eye || (nowMs - lastDeductionTime.eye) > DEDUCTION_COOLDOWN) {
+                driverScore -= 10;
+                lastDeductionTime.eye = nowMs;
+            }
+        }
+        if (wheelAlert) {
+            if (!lastDeductionTime.wheel || (nowMs - lastDeductionTime.wheel) > DEDUCTION_COOLDOWN) {
+                driverScore -= 5;
+                lastDeductionTime.wheel = nowMs;
+            }
+        }
+        if (phoneAlert) {
+            if (!lastDeductionTime.phone || (nowMs - lastDeductionTime.phone) > DEDUCTION_COOLDOWN) {
+                driverScore -= 15;
+                lastDeductionTime.phone = nowMs;
+            }
+        }
         
         updateStatusIcons({ eyeAlert, yawnAlert, handsAlert, phoneAlert, wheelAlert, faceLost, yawAlertText, pitchAlertText });
 
@@ -573,6 +633,8 @@
           isRunning = true; btnToggle.textContent='Stop';
           blinkCount = 0; eyesCount = 0; yawnCount = 0; phoneCount = 0; handsCount = 0; wheelCount = 0;
           hasAlertedEyes = false; hasAlertedYawn = false; hasAlertedPhone = false; hasAlertedHands = false; hasAlertedWheel = false;
+          driverScore = 100; 
+          lastDeductionTime = {};
           scheduleNext(loop);
         }catch(err){ 
           console.error(err);
